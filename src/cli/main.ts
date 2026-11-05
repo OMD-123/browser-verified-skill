@@ -11,6 +11,8 @@ import { printResult, type CommandResult } from '../core/output.js';
 import { DESCRIPTION, VERSION } from '../version.js';
 import { registerDoctor } from './commands/doctor.js';
 import { registerInit } from './commands/init.js';
+import { registerSession } from './commands/session.js';
+import { registerPerception } from './commands/perception.js';
 import { globalOptions } from './helpers.js';
 
 /** Global options every command inherits from the root program. */
@@ -39,6 +41,8 @@ export function buildProgram(): Command {
 
   registerDoctor(program);
   registerInit(program);
+  registerSession(program);
+  registerPerception(program);
 
   return program;
 }
@@ -69,6 +73,13 @@ export function mapCommanderError(err: CommanderError): ExitCode {
  * can assert on it.
  */
 export async function run(argv: readonly string[]): Promise<number> {
+  // The daemon is re-spawned from the bundle with `--daemon`; in that mode
+  // this process runs the daemon instead of the CLI.
+  if (argv.includes('--daemon')) {
+    await runDaemonFromArgv(argv);
+    return EXIT.OK;
+  }
+
   const program = buildProgram();
   program.exitOverride();
 
@@ -128,4 +139,69 @@ export async function run(argv: readonly string[]): Promise<number> {
 export async function main(argv: readonly string[] = process.argv): Promise<void> {
   const code = await run(argv.slice(2));
   process.exitCode = code;
+}
+
+/**
+ * Run the daemon, from the `--daemon` flag.
+ *
+ * The daemon never returns: it serves until it is stopped.
+ */
+async function runDaemonFromArgv(argv: readonly string[]): Promise<void> {
+  const { runDaemonProcess } = await import('../core/daemon-process.js');
+  const options = parseDaemonArgs(argv);
+  await runDaemonProcess(options);
+}
+
+/** Parse the daemon's command-line arguments. */
+function parseDaemonArgs(argv: readonly string[]): {
+  cwd: string;
+  session: string;
+  headed: boolean;
+  contact?: string;
+  runId?: string;
+} {
+  let cwd = process.cwd();
+  let session = 'default';
+  let headed = false;
+  let contact: string | undefined;
+  let runId: string | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--cwd') {
+      const value = argv[i + 1];
+      if (value !== undefined) {
+        cwd = value;
+        i++;
+      }
+    } else if (arg === '--session') {
+      const value = argv[i + 1];
+      if (value !== undefined) {
+        session = value;
+        i++;
+      }
+    } else if (arg === '--headed') {
+      headed = true;
+    } else if (arg === '--contact') {
+      const value = argv[i + 1];
+      if (value !== undefined) {
+        contact = value;
+        i++;
+      }
+    } else if (arg === '--run-id') {
+      const value = argv[i + 1];
+      if (value !== undefined) {
+        runId = value;
+        i++;
+      }
+    }
+  }
+
+  return {
+    cwd,
+    session,
+    headed,
+    ...(contact !== undefined ? { contact } : {}),
+    ...(runId !== undefined ? { runId } : {}),
+  };
 }

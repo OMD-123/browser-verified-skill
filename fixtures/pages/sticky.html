@@ -5,6 +5,10 @@
     <title>Fixture — Sticky header covering a button</title>
     <link rel="stylesheet" href="/pages/shared.css" />
     <style>
+      /*
+       * A fixed header pinned to the top of the viewport, 144px tall in total
+       * (120px height + 12px padding above and below).
+       */
       #sticky-header {
         position: fixed;
         top: 0;
@@ -16,8 +20,21 @@
         z-index: 10000;
         padding: 12px;
       }
-      #spacer {
-        height: 400px;
+      /*
+       * The covered button is placed inside a container whose top is offset
+       * from the document origin by exactly `#covered-offset` pixels. The page
+       * is then scrolled to `#initial-scroll`, which puts the button's centre
+       * inside the header's band.
+       *
+       * The geometry is deliberately *solvable*: scrolling up by
+       * `#initial-scroll - 100` puts the button below the header. A fixture
+       * where the element could never clear the cover would test nothing.
+       */
+      #covered-offset {
+        height: 260px;
+      }
+      #below-fold {
+        height: 1200px;
       }
     </style>
   </head>
@@ -27,16 +44,19 @@
       <p>This overlay covers the button below until you scroll past it.</p>
     </div>
     <main>
-      <div id="spacer"></div>
-      <h1>Under the header</h1>
-      <!-- This button sits behind the fixed header at scroll position 0. -->
+      <div id="covered-offset"></div>
+      <!-- This button starts underneath the fixed header. -->
       <button type="button" id="covered" data-testid="covered">Covered button</button>
       <p id="covered-status"></p>
+      <div id="below-fold"></div>
     </main>
     <script>
       document.getElementById('covered').addEventListener('click', () => {
         document.getElementById('covered-status').textContent = 'Covered clicked';
       });
+      // Land the button underneath the fixed header: the button's document
+      // offset is ~260, so scrolling to 200 puts it at viewport y ≈ 60.
+      window.scrollTo(0, 200);
     </script>
   </body>
 </html>

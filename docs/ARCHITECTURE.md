@@ -36,79 +36,79 @@ daemon. The CLI is not a trust boundary — it is a rendering layer.
 
 ### `src/core/` — the daemon and its plumbing
 
-| Module | Responsibility |
-|---|---|
-| `daemon.ts` | Owns the `Browser`, serves the HTTP API, enforces the token. |
-| `client.ts` | The CLI-side HTTP client. Talks to `daemon.json`. |
-| `contexts.ts` | Browser contexts, tabs, popups, frames, storage state. |
-| `exit.ts` | The documented exit codes. |
-| `errors.ts` | Typed errors carrying an exit code and reason codes. |
-| `output.ts` | `--json` / human output contract. |
-| `paths.ts` | The `.bv/` filesystem layout. |
-| `clock.ts` | Injectable clock, so time-dependent logic is testable. |
+| Module        | Responsibility                                               |
+| ------------- | ------------------------------------------------------------ |
+| `daemon.ts`   | Owns the `Browser`, serves the HTTP API, enforces the token. |
+| `client.ts`   | The CLI-side HTTP client. Talks to `daemon.json`.            |
+| `contexts.ts` | Browser contexts, tabs, popups, frames, storage state.       |
+| `exit.ts`     | The documented exit codes.                                   |
+| `errors.ts`   | Typed errors carrying an exit code and reason codes.         |
+| `output.ts`   | `--json` / human output contract.                            |
+| `paths.ts`    | The `.bv/` filesystem layout.                                |
+| `clock.ts`    | Injectable clock, so time-dependent logic is testable.       |
 
 ### `src/perception/` — turning a page into a compact tree
 
-| Module | Responsibility |
-|---|---|
-| `snapshot.ts` | Fetch the AX tree, build the node model, allocate refs. |
-| `diff.ts` | Structural diff between two snapshots. |
-| `prune.ts` | Drop decorative/duplicate/hidden nodes, collapse lists, truncate text. |
-| `refs.ts` | Ref ↔ node identity mapping, stable across steps. |
-| `tokens.ts` | Token estimation (chars ÷ 4), flagged as an estimate. |
+| Module        | Responsibility                                                         |
+| ------------- | ---------------------------------------------------------------------- |
+| `snapshot.ts` | Fetch the AX tree, build the node model, allocate refs.                |
+| `diff.ts`     | Structural diff between two snapshots.                                 |
+| `prune.ts`    | Drop decorative/duplicate/hidden nodes, collapse lists, truncate text. |
+| `refs.ts`     | Ref ↔ node identity mapping, stable across steps.                      |
+| `tokens.ts`   | Token estimation (chars ÷ 4), flagged as an estimate.                  |
 
-**Invariant:** a ref is bound to a *node key*, not to a tree position. A ref
+**Invariant:** a ref is bound to a _node key_, not to a tree position. A ref
 survives re-snapshots while the element exists, and is invalidated only by a
 navigation.
 
 ### `src/actions/` — doing things to the page
 
-| Module | Responsibility |
-|---|---|
-| `locate.ts` | The locator chain: ref → role+name → label → text → test-id → CSS. |
-| `act.ts` | Execute an action and report which strategy won. |
-| `waits.ts` | Condition-based waits. Never a fixed sleep. |
-| `download.ts` | Download capture. |
-| `frames.ts` | Frame refs and cross-origin traversal. |
+| Module        | Responsibility                                                     |
+| ------------- | ------------------------------------------------------------------ |
+| `locate.ts`   | The locator chain: ref → role+name → label → text → test-id → CSS. |
+| `act.ts`      | Execute an action and report which strategy won.                   |
+| `waits.ts`    | Condition-based waits. Never a fixed sleep.                        |
+| `download.ts` | Download capture.                                                  |
+| `frames.ts`   | Frame refs and cross-origin traversal.                             |
 
 **Invariant:** the winning locator strategy is recorded on every action. That
 record is the input to healing and drift reporting.
 
 ### `src/safety/` — the security layer (100% branch coverage required)
 
-| Module | Responsibility |
-|---|---|
-| `policy.ts` | Action classification and the `allow`/`deny`/`needs_approval` verdict. |
-| `approvals.ts` | One-time, action-bound approval tokens. |
-| `planlock.ts` | The plan envelope; `off_plan` denial. |
-| `taint.ts` | Provenance tracking and sink checks. |
-| `injection/` | Detectors, the nonce envelope, sanitisation. |
-| `vault.ts` | AES-256-GCM secret storage, placeholder resolution. |
-| `redact.ts` | Secret masking applied at every sink. |
-| `dryrun.ts` | Request interception and the dry-run report. |
-| `compliance/robots.ts` | robots.txt fetch, cache, evaluation. |
-| `compliance/ratelimit.ts` | Per-domain token bucket with jitter. |
-| `compliance/handoff.ts` | Human handoff protocol. |
-| `compliance/captcha-detect.ts` | CAPTCHA / login wall / 2FA detection. |
+| Module                         | Responsibility                                                         |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| `policy.ts`                    | Action classification and the `allow`/`deny`/`needs_approval` verdict. |
+| `approvals.ts`                 | One-time, action-bound approval tokens.                                |
+| `planlock.ts`                  | The plan envelope; `off_plan` denial.                                  |
+| `taint.ts`                     | Provenance tracking and sink checks.                                   |
+| `injection/`                   | Detectors, the nonce envelope, sanitisation.                           |
+| `vault.ts`                     | AES-256-GCM secret storage, placeholder resolution.                    |
+| `redact.ts`                    | Secret masking applied at every sink.                                  |
+| `dryrun.ts`                    | Request interception and the dry-run report.                           |
+| `compliance/robots.ts`         | robots.txt fetch, cache, evaluation.                                   |
+| `compliance/ratelimit.ts`      | Per-domain token bucket with jitter.                                   |
+| `compliance/handoff.ts`        | Human handoff protocol.                                                |
+| `compliance/captcha-detect.ts` | CAPTCHA / login wall / 2FA detection.                                  |
 
 ### `src/verify/` — proving it worked
 
-| Module | Responsibility |
-|---|---|
-| `conditions.ts` | The success-condition DSL (zod-validated). |
-| `verifier.ts` | Evaluates conditions; deterministic first. |
-| `evidence.ts` | Produces the evidence bundle. |
-| `extract.ts` | JSON Schema → zod extraction with per-field evidence. |
+| Module          | Responsibility                                        |
+| --------------- | ----------------------------------------------------- |
+| `conditions.ts` | The success-condition DSL (zod-validated).            |
+| `verifier.ts`   | Evaluates conditions; deterministic first.            |
+| `evidence.ts`   | Produces the evidence bundle.                         |
+| `extract.ts`    | JSON Schema → zod extraction with per-field evidence. |
 
 ### `src/compile/` — turning a run into a script
 
-| Module | Responsibility |
-|---|---|
-| `recorder.ts` | Normalised IR steps. |
+| Module        | Responsibility                                                 |
+| ------------- | -------------------------------------------------------------- |
+| `recorder.ts` | Normalised IR steps.                                           |
 | `compiler.ts` | IR → readable Playwright TypeScript, with inferred assertions. |
-| `replay.ts` | Deterministic re-execution, zero LLM cost. |
-| `heal.ts` | Fallback-chain healing; structured failure for the host agent. |
-| `drift.ts` | The drift log: what changed, and when. |
+| `replay.ts`   | Deterministic re-execution, zero LLM cost.                     |
+| `heal.ts`     | Fallback-chain healing; structured failure for the host agent. |
+| `drift.ts`    | The drift log: what changed, and when.                         |
 
 ### `src/interaction/` — realistic (not evasive) interaction
 

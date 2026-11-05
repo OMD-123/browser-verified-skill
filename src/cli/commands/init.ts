@@ -117,7 +117,11 @@ export function registerInit(program: Command): void {
         const message = err instanceof Error ? err.message : String(err);
         emit(
           cmd,
-          fail({ error: 'init_failed', message }, [`Could not initialise: ${message}`], EXIT.FAILURE),
+          fail(
+            { error: 'init_failed', message },
+            [`Could not initialise: ${message}`],
+            EXIT.FAILURE,
+          ),
         );
       }
     });

@@ -459,3 +459,115 @@ the brief forbids it.
 pricing. The default tier ids in `policies/default.yaml` are checked against
 the current Anthropic model list at build time and documented in
 `KNOWN_LIMITATIONS.md` if they cannot be confirmed.
+
+---
+
+## D-0027 — Perception uses Playwright's `ariaSnapshotJSON({ mode: 'ai' })`, not the CDP AX tree
+
+**Decision.** The perception layer reads the accessibility tree through
+`page.ariaSnapshotJSON({ mode: 'ai' })`, which returns a JSON tree whose nodes
+carry `role`, `name`, `text`, `ref` and state flags. Refs are resolved back to
+elements with `page.getByRef(ref)`.
+
+**Alternatives rejected.** The CDP `Accessibility.getFullAXTree` +
+`DOM.describeNode` approach sketched in D-0001/D-0002: it requires us to
+implement ref allocation, ref stability, cross-frame traversal and shadow-DOM
+traversal ourselves.
+
+**Reason.** Verified against the installed `playwright@1.64.1` typings and by
+direct experiment (see `evals/probe-refs.ts`):
+
+- `ariaSnapshotJSON` exists and returns `Promise<Serializable>`; in `mode:'ai'`
+  it emits `ref` on every node.
+- `page.getByRef(ref)` is public API and resolves refs **across frame
+  boundaries** (`f4e3` resolved a button inside a same-origin iframe) and
+  **inside open shadow roots** (`f4e6` resolved the shadow button).
+- Refs are **stable across re-snapshots** of an unchanged page — verified
+  byte-identical across two consecutive calls.
+- Refs are **NOT stable across a navigation**: the frame counter is
+  context-global and monotonic, so the same page yields `f1e*` on one load and
+  `f3e*` after a re-navigation.
+
+That last property is the important one. Because refs change after a
+navigation, the diff layer matches on a **loose identity** (role + name) as a
+fallback, and reports a ref change as `changed` with `field: 'ref'` rather
+than as a removal plus an addition.
+
+**Consequence.** D-0001 and D-0002 are superseded for the _source_ of the tree.
+We still own pruning, diffing, the token budget and the injection scanning.
+
+---
+
+## D-0028 — The diff omits the URL when it has not changed
+
+**Decision.** The one-line diff header includes the URL only when it differs
+from the previous snapshot. The title is always included.
+
+**Alternatives rejected.** Always including the URL: on a long URL the header
+costs more tokens than the change it describes, and the acceptance criterion
+is that a form-fill diff is under 15% of the full tree.
+
+**Reason.** The header is fixed overhead on every single step, so it must be
+as small as possible while still identifying the page. The URL is in the JSON
+payload and in the snapshot file when it is needed.
+
+**Measured.** On the fixture signup form, a one-field fill produces a 118-char
+diff against a 724-char full tree (16.3% before this change; under 15% after).
+
+---
+
+## D-0029 — Actions scroll the target out from under a covering element, and the scroll direction is inverted
+
+**Decision.** Before clicking, hovering, typing into or selecting an element,
+`scrollIntoClearView()` finds the element that is actually on top of the
+target's centre (via `document.elementFromPoint`) and, if it is not the target
+or an ancestor of it, scrolls the window just far enough to clear the
+covering element's edge.
+
+**Alternatives rejected.**
+
+- `scrollIntoViewIfNeeded()` alone: the element can be "in view" and still be
+  covered by a fixed overlay.
+- `scrollIntoView({ block: 'center' })`: cannot work when the element is too
+  close to the top of the document to be scrolled to the centre. On the
+  sticky-header fixture, the button sits at document y ≈ 260 and the page
+  cannot scroll at all, so the button could never clear a 144px header.
+- `force: true`: it skips the actionability checks entirely, so the click
+  lands on the _covering_ element rather than the target. That is worse than
+  failing.
+
+**Reason.** This is a real-world failure mode that silently produces wrong
+behaviour (clicking the cookie banner instead of the button behind it), so it
+must be handled rather than worked around.
+
+**The subtlety.** Moving an element _down_ out from under a top-anchored cover
+requires scrolling the page _up_ (decreasing `scrollY`), because the cover
+stays pinned to the viewport while the element moves down within it. The first
+implementation scrolled in the wrong direction and silently did nothing. The
+direction is now derived from the geometry rather than assumed.
+
+**Known limitation.** If the page cannot scroll far enough (the element is
+genuinely unreachable), the action fails with a timeout rather than clicking
+the wrong thing. That is the correct failure mode.
+
+---
+
+## D-0030 — The daemon is spawned through `tsx` from source, and re-spawns the bundle when packaged
+
+**Decision.** `bv session start` spawns a detached process. From the source
+tree it runs `node node_modules/tsx/dist/cli.mjs src/core/daemon-entry.ts`; from
+the bundled CLI it re-spawns `scripts/bv.mjs --daemon …`, and the CLI's `main`
+dispatches to the daemon when it sees `--daemon`.
+
+**Alternatives rejected.** Spawning `node src/core/daemon-entry.js`: the source
+is TypeScript and is never emitted to disk, so the path does not exist.
+Shipping a second compiled artifact: it would double the published surface
+for no benefit.
+
+**Reason.** The daemon must be a separate process (it owns the browser and
+outlives the CLI), and it must be launchable from both development and the
+packaged artifact.
+
+**Consequence.** `src/core/daemon-entry.ts` and the `--daemon` path in
+`src/cli/main.ts` are two entry points for the same code. They must stay in
+sync; both delegate to `runDaemonProcess`.

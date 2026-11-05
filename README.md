@@ -42,11 +42,11 @@ afterwards.
 An agent that drives a browser has three problems, and this toolkit attacks all
 three:
 
-| Problem | What `bv` does |
-|---|---|
-| **Token cost** | Returns a *diff* of the accessibility tree, not the whole tree, and prunes decorative nodes. A 3-field form fill costs a fraction of a full snapshot. |
-| **Unverifiable results** | Every run ends with a machine-checked **success condition** plus **evidence** (screenshot, snapshot, network facts). A run that does not verify is `unverified`, never "done". |
-| **Fragile scripts** | The run is recorded as an intermediate representation and **compiled to a plain Playwright TypeScript script** with inferred assertions, which you can then replay for free and **heal** when a selector breaks. |
+| Problem                  | What `bv` does                                                                                                                                                                                                   |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Token cost**           | Returns a _diff_ of the accessibility tree, not the whole tree, and prunes decorative nodes. A 3-field form fill costs a fraction of a full snapshot.                                                            |
+| **Unverifiable results** | Every run ends with a machine-checked **success condition** plus **evidence** (screenshot, snapshot, network facts). A run that does not verify is `unverified`, never "done".                                   |
+| **Fragile scripts**      | The run is recorded as an intermediate representation and **compiled to a plain Playwright TypeScript script** with inferred assertions, which you can then replay for free and **heal** when a selector breaks. |
 
 On top of that, the safety layer is the point, not a checkbox: prompt-injection
 defenses, taint tracking, an approval gate, plan-lock, a secrets vault, network
@@ -152,15 +152,15 @@ state.
 
 Every command supports `--help`, `--json` and a meaningful exit code.
 
-| Exit code | Meaning |
-|---|---|
-| 0 | ok |
-| 1 | failure |
-| 2 | usage error |
-| 3 | policy denied |
-| 4 | needs approval |
-| 5 | injection block |
-| 6 | verification failed |
+| Exit code | Meaning             |
+| --------- | ------------------- |
+| 0         | ok                  |
+| 1         | failure             |
+| 2         | usage error         |
+| 3         | policy denied       |
+| 4         | needs approval      |
+| 5         | injection block     |
+| 6         | verification failed |
 
 ```text
 bv doctor [--install]               bv test [--plan f|--auto]

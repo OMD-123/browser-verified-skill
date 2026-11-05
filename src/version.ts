@@ -46,8 +46,7 @@ function findManifest(): Manifest {
 const manifest = findManifest();
 
 /** The package version, used in the user agent and `--version` output. */
-export const VERSION: string =
-  typeof manifest.version === 'string' ? manifest.version : '0.0.0';
+export const VERSION: string = typeof manifest.version === 'string' ? manifest.version : '0.0.0';
 
 /** The package description. */
 export const DESCRIPTION: string =
