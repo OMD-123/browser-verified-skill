@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Hover menu</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Hover menu</h1>
+      <nav>
+        <div class="menu" id="menu">
+          <button
+            type="button"
+            id="menu-trigger"
+            data-testid="menu-trigger"
+            aria-haspopup="true"
+            aria-expanded="false"
+          >
+            More
+          </button>
+          <ul id="menu-list" hidden>
+            <li><a href="/pages/login.html" id="menu-login">Login</a></li>
+            <li><a href="/pages/wizard.html" id="menu-wizard">Wizard</a></li>
+            <li>
+              <button type="button" id="menu-action" data-testid="menu-action">Do thing</button>
+            </li>
+          </ul>
+        </div>
+      </nav>
+      <p id="hover-status"></p>
+    </main>
+    <script>
+      const trigger = document.getElementById('menu-trigger');
+      const list = document.getElementById('menu-list');
+      let hideTimer = null;
+
+      trigger.addEventListener('mouseenter', () => {
+        clearTimeout(hideTimer);
+        list.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+      });
+      trigger.addEventListener('mouseleave', () => {
+        hideTimer = setTimeout(() => {
+          list.hidden = true;
+          trigger.setAttribute('aria-expanded', 'false');
+        }, 250);
+      });
+      list.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+      list.addEventListener('mouseleave', () => {
+        hideTimer = setTimeout(() => {
+          list.hidden = true;
+          trigger.setAttribute('aria-expanded', 'false');
+        }, 250);
+      });
+      document.getElementById('menu-action').addEventListener('click', () => {
+        document.getElementById('hover-status').textContent = 'Action done';
+      });
+    </script>
+  </body>
+</html>

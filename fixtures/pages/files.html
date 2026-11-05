@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Upload & download</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Files</h1>
+      <form id="upload-form">
+        <label for="file">Choose a file</label>
+        <input id="file" name="file" type="file" />
+        <button type="submit" data-testid="upload">Upload</button>
+      </form>
+      <p id="upload-status" role="status"></p>
+
+      <p>
+        <a
+          id="download-link"
+          href="/download/report.csv"
+          download="report.csv"
+          data-testid="download"
+          >Download report</a
+        >
+      </p>
+    </main>
+    <script>
+      document.getElementById('upload-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('file');
+        if (!input.files || input.files.length === 0) {
+          document.getElementById('upload-status').textContent = 'No file chosen';
+          return;
+        }
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        const res = await fetch('/api/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        document.getElementById('upload-status').textContent =
+          'Uploaded ' + input.files[0].name + ' (' + data.bytes + ' bytes)';
+      });
+    </script>
+  </body>
+</html>

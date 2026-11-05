@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Flaky timing</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Flaky</h1>
+      <p id="status">Idle</p>
+      <button type="button" id="run" data-testid="run">Run flaky operation</button>
+      <p id="result"></p>
+    </main>
+    <script>
+      // Seeded pseudo-random delays: the same step index always takes the same
+      // time, so tests are reproducible while still exercising timing races.
+      let seed = 1;
+      function nextSeed() {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648;
+      }
+      document.getElementById('run').addEventListener('click', () => {
+        const delay = Math.floor(nextSeed() * 400) + 50;
+        document.getElementById('status').textContent = 'Working…';
+        document.getElementById('result').textContent = '';
+        setTimeout(() => {
+          document.getElementById('status').textContent = 'Idle';
+          document.getElementById('result').textContent = 'Completed in ' + delay + 'ms';
+          document.body.setAttribute('data-flaky', 'done');
+        }, delay);
+      });
+    </script>
+  </body>
+</html>

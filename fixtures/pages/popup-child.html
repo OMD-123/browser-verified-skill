@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Popup child</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 12px">
+    <h2>Popup child</h2>
+    <p id="child-label">Child window body</p>
+    <button type="button" id="child-button" data-testid="child-button">Child action</button>
+    <script>
+      document.getElementById('child-button').addEventListener('click', () => {
+        document.getElementById('child-label').textContent = 'Child clicked';
+      });
+    </script>
+  </body>
+</html>

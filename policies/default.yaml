@@ -1,0 +1,71 @@
+# browser-verified default policy
+#
+# Copy to .bv/policy.yaml (bv init does this) and edit to taste.
+# The schema is validated with zod .strict(): an unknown key is a hard error.
+# See docs/DECISIONS.md and references/policy.md for the full reference.
+
+version: 1
+
+# Origins and hosts the session may touch.
+# Entries may be plain ("example.com", "*.example.com") or use the explicit
+# @url: marker ("@url:`http://localhost:3000`"). A path in a @url: entry is
+# stripped to its origin.
+domains:
+  allow:
+    - localhost
+    - "127.0.0.1"
+    - "*.example.com"
+  deny: []
+
+# Origins you own. These are exempt from robots.txt, and are the only origins
+# where "messy-user mode" (typos, double clicks, mid-flow refresh/back) and
+# API discovery are permitted.
+ownedOrigins:
+  - "@url:`http://localhost:3000`"
+
+# Action classes that require an explicit approval before they run.
+# Classes: read navigate input submit destructive financial messaging download upload
+actionClasses:
+  approvalRequired:
+    - submit
+    - destructive
+    - financial
+    - messaging
+    - upload
+  deny: []
+
+# Hard limits for a single run. Breaching any of these stops the run and
+# reports what is stuck — it never spins.
+budgets:
+  maxSteps: 80
+  maxRetriesPerStep: 2
+  maxSeconds: 600
+  maxTokens: 200000
+
+# Politeness. This is rate limiting, not evasion.
+rate:
+  maxRpsPerDomain: 1
+  jitterMs: [300, 1200]
+
+compliance:
+  respectRobots: true
+  # Honest user agent. Keep the contact URL accurate so site owners can reach you.
+  userAgentSuffix: "BrowserVerified/1.0 (+@url:`https://your-site/contact`)"
+  captcha: human_handoff
+  # eval-readonly is off by default; enabling it allows DOM reads only.
+  evalReadonly: false
+
+secrets:
+  maskInLogs: true
+
+# LLM tiers used only by Mode B (bv run --goal). Mode A never uses these.
+llm:
+  tiers:
+    nav: claude-haiku-5-5
+    plan: claude-sonnet-5-5
+    verify: claude-sonnet-5-5
+  maxEscalations: 2
+
+# Site memory (playbooks) TTL.
+memory:
+  ttlDays: 30

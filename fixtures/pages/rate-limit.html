@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Rate limited</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Rate limited endpoint</h1>
+      <p>Every third request to /api/rate-limited returns 429.</p>
+      <button type="button" id="hit" data-testid="hit">Send request</button>
+      <pre id="out"></pre>
+    </main>
+    <script>
+      document.getElementById('hit').addEventListener('click', async () => {
+        const res = await fetch('/api/rate-limited');
+        document.getElementById('out').textContent = res.status + ' ' + (await res.text());
+        document.body.setAttribute('data-last-status', String(res.status));
+      });
+    </script>
+  </body>
+</html>

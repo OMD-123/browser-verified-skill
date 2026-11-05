@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Captcha challenge</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Verify you are human</h1>
+      <p id="challenge-text">Please complete the security challenge to continue.</p>
+      <div id="captcha-widget" data-testid="captcha">
+        <label for="captcha-input">Enter the code shown</label>
+        <input id="captcha-input" name="captcha" type="text" />
+        <img
+          id="captcha-img"
+          alt="Captcha image"
+          src="/pages/captcha.svg"
+          width="160"
+          height="60"
+        />
+      </div>
+      <button type="button" id="submit-captcha" data-testid="submit-captcha">Verify</button>
+      <p id="captcha-status" role="status"></p>
+    </main>
+    <script>
+      document.getElementById('submit-captcha').addEventListener('click', () => {
+        const v = document.getElementById('captcha-input').value.trim();
+        if (v.toUpperCase() === 'ABC123') {
+          document.getElementById('captcha-status').textContent = 'Verified';
+          document.body.setAttribute('data-captcha', 'solved');
+        } else {
+          document.getElementById('captcha-status').textContent = 'Incorrect';
+          document.body.setAttribute('data-captcha', 'failed');
+        }
+      });
+    </script>
+  </body>
+</html>

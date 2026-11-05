@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Sticky header covering a button</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+    <style>
+      #sticky-header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 120px;
+        background: #22303c;
+        color: #fff;
+        z-index: 10000;
+        padding: 12px;
+      }
+      #spacer {
+        height: 400px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sticky-header">
+      <strong>Sticky header</strong>
+      <p>This overlay covers the button below until you scroll past it.</p>
+    </div>
+    <main>
+      <div id="spacer"></div>
+      <h1>Under the header</h1>
+      <!-- This button sits behind the fixed header at scroll position 0. -->
+      <button type="button" id="covered" data-testid="covered">Covered button</button>
+      <p id="covered-status"></p>
+    </main>
+    <script>
+      document.getElementById('covered').addEventListener('click', () => {
+        document.getElementById('covered-status').textContent = 'Covered clicked';
+      });
+    </script>
+  </body>
+</html>

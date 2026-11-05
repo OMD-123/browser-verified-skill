@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Frames</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Frames</h1>
+      <section>
+        <h2>Same-origin iframe</h2>
+        <iframe
+          id="inner"
+          src="/pages/frame-inner.html"
+          title="Inner frame"
+          width="400"
+          height="180"
+        ></iframe>
+      </section>
+      <section>
+        <h2>Cross-origin-style iframe</h2>
+        <!-- The port is resolved at runtime so the test can point it at a second server. -->
+        <iframe id="cross" title="Cross origin frame" width="400" height="180"></iframe>
+      </section>
+    </main>
+    <script>
+      fetch('/__cross-origin-port')
+        .then((r) => r.text())
+        .then((p) => {
+          document.getElementById('cross').src =
+            'http://127.0.0.1:' + p + '/pages/frame-cross.html';
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>

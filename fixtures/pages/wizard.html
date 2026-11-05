@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Wizard</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Account setup</h1>
+      <ol id="steps-indicator">
+        <li data-step="1" data-state="current">Basics</li>
+        <li data-step="2">Address</li>
+        <li data-step="3">Review</li>
+      </ol>
+
+      <form id="wizard">
+        <fieldset data-step="1">
+          <legend>Basics</legend>
+          <label for="fullname">Full name</label>
+          <input id="fullname" name="fullname" type="text" />
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" />
+          <button type="button" data-testid="next" id="next-1">Next</button>
+        </fieldset>
+
+        <fieldset data-step="2" hidden>
+          <legend>Address</legend>
+          <label for="city">City</label>
+          <input id="city" name="city" type="text" />
+          <label for="country">Country</label>
+          <select id="country" name="country">
+            <option value="">Choose…</option>
+            <option value="in">India</option>
+            <option value="us">United States</option>
+            <option value="de">Germany</option>
+          </select>
+          <button type="button" data-testid="next" id="next-2">Next</button>
+          <button type="button" data-testid="back" id="back-2">Back</button>
+        </fieldset>
+
+        <fieldset data-step="3" hidden>
+          <legend>Review</legend>
+          <p id="review-text">Review your details</p>
+          <label for="agree"> <input id="agree" name="agree" type="checkbox" /> I agree </label>
+          <button type="submit" data-testid="submit-wizard">Finish</button>
+          <button type="button" data-testid="back" id="back-3">Back</button>
+        </fieldset>
+      </form>
+
+      <p id="wizard-status" role="status"></p>
+    </main>
+    <script>
+      let current = 1;
+      const fieldsets = Array.from(document.querySelectorAll('#wizard fieldset'));
+      const indicator = Array.from(document.querySelectorAll('#steps-indicator li'));
+
+      function show(n) {
+        current = n;
+        fieldsets.forEach((fs) => {
+          fs.hidden = Number(fs.dataset.step) !== n;
+        });
+        indicator.forEach((li) => {
+          const s = Number(li.dataset.step);
+          li.setAttribute('data-state', s === n ? 'current' : s < n ? 'done' : 'todo');
+        });
+      }
+
+      document.getElementById('next-1').addEventListener('click', () => show(2));
+      document.getElementById('next-2').addEventListener('click', () => {
+        document.getElementById('review-text').textContent =
+          'Name: ' +
+          document.getElementById('fullname').value +
+          ' / City: ' +
+          document.getElementById('city').value;
+        show(3);
+      });
+      document.getElementById('back-2').addEventListener('click', () => show(1));
+      document.getElementById('back-3').addEventListener('click', () => show(2));
+
+      document.getElementById('wizard').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!document.getElementById('agree').checked) {
+          document.getElementById('wizard-status').textContent = 'Must accept terms';
+          return;
+        }
+        document.getElementById('wizard-status').textContent = 'Account created';
+        document.body.setAttribute('data-wizard', 'complete');
+      });
+    </script>
+  </body>
+</html>

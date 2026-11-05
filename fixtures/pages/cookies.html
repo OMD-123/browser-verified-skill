@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Cookie banner</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Cookie banner</h1>
+      <p>Main content that must become reachable after dismissing the banner.</p>
+      <button type="button" data-testid="behind-banner" id="behind-banner">
+        Button behind banner
+      </button>
+    </main>
+
+    <div
+      id="cookie-banner"
+      role="dialog"
+      aria-label="Cookie consent"
+      style="
+        position: fixed;
+        inset: auto 0 0 0;
+        background: #101418;
+        color: #fff;
+        padding: 16px;
+        z-index: 9999;
+      "
+    >
+      <p>We use cookies.</p>
+      <button type="button" id="accept" data-testid="accept-cookies">Accept</button>
+      <button type="button" id="reject" data-testid="reject-cookies">Reject</button>
+    </div>
+
+    <script>
+      document.getElementById('accept').addEventListener('click', () => {
+        document.getElementById('cookie-banner').remove();
+        document.body.setAttribute('data-cookies', 'accepted');
+      });
+      document.getElementById('reject').addEventListener('click', () => {
+        document.getElementById('cookie-banner').remove();
+        document.body.setAttribute('data-cookies', 'rejected');
+      });
+    </script>
+  </body>
+</html>

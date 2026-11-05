@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Infinite scroll</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Feed</h1>
+      <ul id="feed"></ul>
+      <p id="sentinel" data-testid="sentinel">Loading…</p>
+    </main>
+    <script>
+      let n = 0;
+      const feed = document.getElementById('feed');
+
+      function addBatch() {
+        for (let i = 0; i < 10; i++) {
+          n += 1;
+          const li = document.createElement('li');
+          li.setAttribute('data-item', String(n));
+          li.textContent = 'Item ' + n;
+          feed.appendChild(li);
+        }
+        document.getElementById('sentinel').textContent = n >= 50 ? 'End of feed' : 'Loading…';
+        document.body.setAttribute('data-count', String(n));
+      }
+
+      const io = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) addBatch();
+      });
+      io.observe(document.getElementById('sentinel'));
+      addBatch();
+    </script>
+  </body>
+</html>

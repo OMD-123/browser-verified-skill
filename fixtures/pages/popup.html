@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Popup</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Popup</h1>
+      <button type="button" data-testid="open-popup" id="open-popup">Open popup</button>
+      <p id="popup-status"></p>
+    </main>
+    <script>
+      document.getElementById('open-popup').addEventListener('click', () => {
+        const w = window.open('/pages/popup-child.html', 'child', 'width=420,height=320');
+        if (w) {
+          w.addEventListener('load', () => {
+            document.getElementById('popup-status').textContent = 'Popup loaded';
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

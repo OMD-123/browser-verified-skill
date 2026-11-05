@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Delayed SPA</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Delayed render</h1>
+      <div id="root">
+        <p id="loading">Loading…</p>
+      </div>
+    </main>
+    <script>
+      // Renders late on purpose: waits for the condition-based waits to matter.
+      setTimeout(() => {
+        document.getElementById('root').innerHTML =
+          '<h2 data-testid="ready">Ready</h2>' +
+          '<button type="button" id="cta" data-testid="cta">Continue</button>';
+        document.body.setAttribute('data-rendered', 'true');
+      }, 900);
+    </script>
+  </body>
+</html>

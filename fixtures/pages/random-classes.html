@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Randomized class names</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Randomized classes</h1>
+      <!-- Class names change on every load, so CSS selectors are unstable and
+           role/name selectors are the only durable strategy. -->
+      <div id="root">
+        <button type="button" class="btn-primary" id="login-btn" data-testid="login-btn">
+          Sign in
+        </button>
+      </div>
+      <p id="status"></p>
+    </main>
+    <script>
+      const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+      const rnd = (n) => {
+        let s = '';
+        for (let i = 0; i < n; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+        return s;
+      };
+      // Rewrite class names after load (and on a timer) to simulate a build with
+      // hashed CSS module names.
+      function scramble() {
+        const root = document.getElementById('root');
+        const btn = document.getElementById('login-btn');
+        btn.className = 'x-' + rnd(8);
+        root.className = 'y-' + rnd(8);
+      }
+      scramble();
+      document.getElementById('login-btn').addEventListener('click', () => {
+        document.getElementById('status').textContent = 'Signed in';
+      });
+    </script>
+  </body>
+</html>

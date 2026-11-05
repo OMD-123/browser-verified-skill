@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Shadow DOM</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Shadow DOM</h1>
+      <!-- Open shadow root: the accessibility tree still exposes it. -->
+      <div id="host"></div>
+      <div id="closed-host"></div>
+      <p id="shadow-status"></p>
+    </main>
+    <script>
+      const openRoot = document.getElementById('host').attachShadow({ mode: 'open' });
+      openRoot.innerHTML = `
+        <style>.btn { padding: 8px 12px; }</style>
+        <p id="shadow-text">Shadow content</p>
+        <button type="button" class="btn" id="shadow-button" data-testid="shadow-button">Shadow action</button>
+      `;
+      openRoot.getElementById('shadow-button').addEventListener('click', () => {
+        document.getElementById('shadow-status').textContent = 'Shadow clicked';
+      });
+
+      const closedRoot = document.getElementById('closed-host').attachShadow({ mode: 'closed' });
+      closedRoot.innerHTML = '<p id="closed-text">Closed shadow content</p>';
+    </script>
+  </body>
+</html>

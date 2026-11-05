@@ -1,0 +1,20 @@
+# Normalize line endings so the repository is identical on every platform.
+* text=auto eol=lf
+
+# Binary files that must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.sqlite binary
+*.enc binary
+
+# Lockfiles and generated bundles keep LF.
+package-lock.json text eol=lf
+scripts/bv.mjs text eol=lf

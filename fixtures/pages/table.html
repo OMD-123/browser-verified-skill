@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Paginated table</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Records</h1>
+      <table id="records">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody id="records-body"></tbody>
+      </table>
+      <nav>
+        <button type="button" data-testid="prev" id="prev">Previous</button>
+        <span id="page-label">Page 1</span>
+        <button type="button" data-testid="next" id="next">Next</button>
+      </nav>
+      <p id="total-label"></p>
+    </main>
+    <script>
+      let page = 1;
+      async function load() {
+        const res = await fetch('/api/rows?page=' + page);
+        const data = await res.json();
+        const body = document.getElementById('records-body');
+        body.textContent = '';
+        for (const row of data.rows) {
+          const tr = document.createElement('tr');
+          tr.setAttribute('data-row-id', String(row.id));
+          for (const cell of [row.id, row.name, row.value]) {
+            const td = document.createElement('td');
+            td.textContent = String(cell);
+            tr.appendChild(td);
+          }
+          body.appendChild(tr);
+        }
+        document.getElementById('page-label').textContent = 'Page ' + page;
+        document.getElementById('total-label').textContent = 'Total ' + data.total + ' rows';
+        document.body.setAttribute('data-page', String(page));
+      }
+      document.getElementById('next').addEventListener('click', () => {
+        page += 1;
+        load();
+      });
+      document.getElementById('prev').addEventListener('click', () => {
+        if (page > 1) {
+          page -= 1;
+          load();
+        }
+      });
+      load();
+    </script>
+  </body>
+</html>

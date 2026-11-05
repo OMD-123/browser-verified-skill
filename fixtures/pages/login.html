@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Login</title>
+    <link rel="stylesheet" href="/pages/shared.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Sign in</h1>
+      <form id="login-form" action="/pages/login" method="post">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" />
+
+        <button type="submit" data-testid="submit">Log in</button>
+      </form>
+
+      <section id="twofa-section" hidden>
+        <h2>Two-factor code</h2>
+        <p>Enter the 6-digit code we sent you.</p>
+        <form id="otp-form">
+          <label for="otp">One-time code</label>
+          <input id="otp" name="otp" type="text" inputmode="numeric" maxlength="6" />
+          <button type="submit" data-testid="verify-otp">Verify</button>
+        </form>
+      </section>
+
+      <p id="status" role="status"></p>
+    </main>
+    <script>
+      // Deterministic behaviour: any username/password logs in, but a second
+      // factor is always demanded (fake 2FA) so handoff can be exercised.
+      const form = document.getElementById('login-form');
+      const twofa = document.getElementById('twofa-section');
+      const status = document.getElementById('status');
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        twofa.hidden = false;
+        status.textContent = 'Code required';
+      });
+
+      document.getElementById('otp-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const code = document.getElementById('otp').value.trim();
+        if (code === '123456') {
+          status.textContent = 'Signed in';
+          document.body.setAttribute('data-auth', 'ok');
+          sessionStorage.setItem('auth', 'ok');
+        } else {
+          status.textContent = 'Invalid code';
+          document.body.setAttribute('data-auth', 'failed');
+        }
+      });
+    </script>
+  </body>
+</html>

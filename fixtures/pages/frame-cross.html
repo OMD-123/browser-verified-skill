@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Cross origin frame</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 12px">
+    <p id="cross-label">Cross origin frame content</p>
+    <button type="button" id="cross-button" data-testid="cross-button">Cross action</button>
+    <script>
+      document.getElementById('cross-button').addEventListener('click', () => {
+        document.getElementById('cross-label').textContent = 'Cross clicked';
+      });
+    </script>
+  </body>
+</html>

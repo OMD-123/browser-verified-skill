@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — Inner frame</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 12px">
+    <p id="frame-label">Inner frame content</p>
+    <button type="button" id="frame-button" data-testid="frame-button">Frame action</button>
+    <p id="frame-result"></p>
+    <script>
+      document.getElementById('frame-button').addEventListener('click', () => {
+        document.getElementById('frame-result').textContent = 'Frame clicked';
+      });
+    </script>
+  </body>
+</html>
