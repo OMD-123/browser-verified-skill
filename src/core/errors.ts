@@ -39,6 +39,21 @@ export class UsageError extends BvError {
   }
 }
 
+/**
+ * A session could not be reached.
+ *
+ * This is a state problem, not a malformed command line: the command was
+ * correct but there was no session to talk to. It gets the failure exit
+ * code rather than the usage one, so a script can tell "you asked for
+ * something impossible" from "there is no browser running".
+ */
+export class SessionError extends BvError {
+  constructor(message: string, detail: Record<string, unknown> = {}) {
+    super(message, { exitCode: EXIT.FAILURE, detail });
+    this.name = 'SessionError';
+  }
+}
+
 /** A policy rule denied the action. */
 export class PolicyDeniedError extends BvError {
   constructor(message: string, reasons: readonly string[], detail: Record<string, unknown> = {}) {

@@ -6,7 +6,7 @@
  * `.bv/daemon.token`, and speaks the small JSON-over-HTTP protocol.
  */
 import { readDaemonInfo, readDaemonToken, isProcessAlive, daemonBaseUrl } from './daemon-info.js';
-import { UsageError } from './errors.js';
+import { SessionError } from './errors.js';
 import type { DaemonRequest, DaemonResponse } from './daemon.js';
 
 /** A connection to a running daemon. */
@@ -29,22 +29,23 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 /**
  * Connect to the daemon described by `.bv/daemon.json`.
  *
- * Throws a `UsageError` with an actionable message when there is no daemon,
- * which the CLI turns into exit code 2.
+ * Throws a `SessionError` with an actionable message when there is no
+ * daemon. That is a failure (exit 1), not a usage error (exit 2): the
+ * command line was fine, there was simply no browser to talk to.
  */
 export async function connectDaemon(cwd?: string): Promise<DaemonClient> {
   const info = await readDaemonInfo(cwd);
   if (info === undefined) {
-    throw new UsageError('no running session found. Start one with `bv session start`.');
+    throw new SessionError('no running session found. Start one with `bv session start`.');
   }
   if (!isProcessAlive(info.pid)) {
-    throw new UsageError(
+    throw new SessionError(
       `the session process (pid ${info.pid}) is no longer running. Start a new one with \`bv session start\`.`,
     );
   }
   const token = await readDaemonToken(cwd);
   if (token === undefined) {
-    throw new UsageError(
+    throw new SessionError(
       'the session token is missing. Stop the stale session with `bv session stop` and start a new one.',
     );
   }
@@ -77,7 +78,7 @@ export function createClient(baseUrl: string, token: string, port: number): Daem
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new UsageError(`could not reach the session daemon: ${message}`);
+      throw new SessionError(`could not reach the session daemon: ${message}`);
     } finally {
       clearTimeout(timer);
     }
@@ -86,7 +87,9 @@ export function createClient(baseUrl: string, token: string, port: number): Daem
     try {
       body = (await response.json()) as DaemonResponse;
     } catch {
-      throw new UsageError(`the session daemon returned a non-JSON response (${response.status})`);
+      throw new SessionError(
+        `the session daemon returned a non-JSON response (${response.status})`,
+      );
     }
 
     if (!body.ok) {

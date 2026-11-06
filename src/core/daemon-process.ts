@@ -14,6 +14,18 @@ import { renderDiff, renderTree } from '../perception/render.js';
 import { parseTarget, type ActionKind, type TargetDescriptor } from '../actions/locate.js';
 import { EXIT } from './exit.js';
 import type { Page } from 'playwright';
+import { ACTION_CLASSES, loadPolicy, type Policy } from '../safety/policy.js';
+import { PlanLock, PlanSchema, type Plan } from '../safety/planlock.js';
+import { ApprovalStore, hashAction } from '../safety/approvals.js';
+import { evaluateAction } from '../safety/gate.js';
+import { inspectTarget } from '../safety/inspect.js';
+import { sinkForField } from '../safety/taint.js';
+import { isTainted } from '../safety/taint.js';
+import {
+  InjectionScanner,
+  type DomScanInput,
+  type Finding,
+} from '../safety/injection/detectors.js';
 
 /** Options for the daemon process. */
 export interface DaemonProcessOptions {
@@ -27,6 +39,169 @@ export interface DaemonProcessOptions {
   contactUrl?: string;
   /** The run id. Generated when not supplied. */
   runId?: string;
+}
+
+/**
+ * The action classes a plan may allow.
+ *
+ * Used to reject an unknown class in an amendment rather than widening the
+ * plan with a value that means nothing.
+ */
+const ACTION_CLASS_SET = new Set<string>(ACTION_CLASSES);
+
+/**
+ * Collect the injection findings for the current page.
+ *
+ * Two sources are used: the text of the visible tree, and the DOM signals
+ * that the tree does not carry (hidden text, comments, attributes, CSS
+ * `content:`).
+ */
+async function scanForFindings(
+  session: BrowserSession,
+  scanner: InjectionScanner,
+): Promise<Finding[]> {
+  const page = await session.page();
+
+  const visible = await page
+    .locator('body')
+    .innerText({ timeout: 2_000 })
+    .catch(() => '');
+
+  const dom = await collectDomSignals(page);
+
+  const result = scanner.scanDom(dom);
+  const textResult = scanner.scan([{ text: visible }]);
+
+  return [...result.findings, ...textResult.findings];
+}
+
+/**
+ * The DOM-level signals the injection guard looks for.
+ *
+ * Every value is read with `evaluate`, which returns data only. Nothing here
+ * can run code in the page beyond what Playwright's own `evaluate` does.
+ */
+async function collectDomSignals(page: Page): Promise<DomScanInput> {
+  const raw = await page
+    .evaluate(() => {
+      const out: Record<string, unknown> = {
+        hiddenText: [],
+        ariaHiddenText: [],
+        comments: [],
+        attributes: [],
+        cssContent: [],
+        noscript: [],
+        hiddenFields: [],
+      };
+
+      const push = (bucket: string, value: unknown): void => {
+        const list = out[bucket];
+        if (Array.isArray(list)) list.push(value);
+      };
+
+      // Hidden text: elements that are not visible but still carry text.
+      const all = Array.from(document.querySelectorAll('*'));
+      for (const el of all) {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const text = (el.textContent ?? '').trim();
+        if (text.length === 0) continue;
+
+        const hidden =
+          style.display === 'none' ||
+          style.visibility === 'hidden' ||
+          style.opacity === '0' ||
+          style.fontSize === '0px' ||
+          (rect.width === 0 && rect.height === 0) ||
+          rect.top < -1000 ||
+          rect.left < -1000;
+
+        if (hidden) {
+          push('hiddenText', { text: text.slice(0, 2000) });
+        }
+
+        if (el.getAttribute('aria-hidden') === 'true') {
+          push('ariaHiddenText', { text: text.slice(0, 2000) });
+        }
+      }
+
+      // HTML comments.
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+      let comment = walker.nextNode();
+      while (comment !== null) {
+        const text = (comment.textContent ?? '').trim();
+        if (text.length > 0) push('comments', text.slice(0, 2000));
+        comment = walker.nextNode();
+      }
+
+      // Attributes that may carry instructions.
+      const attributeNames = ['alt', 'title', 'aria-label', 'placeholder', 'content', 'value'];
+      for (const el of all) {
+        for (const name of attributeNames) {
+          const value = el.getAttribute(name);
+          if (value !== null && value.trim().length > 0) {
+            push('attributes', { attribute: name, value: value.slice(0, 1000) });
+          }
+        }
+      }
+
+      // Meta tags.
+      for (const meta of Array.from(document.querySelectorAll('meta'))) {
+        const content = meta.getAttribute('content');
+        if (content !== null && content.trim().length > 0) {
+          push('attributes', { attribute: 'meta', value: content.slice(0, 1000) });
+        }
+      }
+
+      // CSS `content:` values.
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules: CSSRuleList | undefined;
+        try {
+          rules = sheet.cssRules;
+        } catch {
+          continue;
+        }
+        if (rules === undefined) continue;
+        for (const rule of Array.from(rules)) {
+          const text = rule.cssText;
+          const match = /content:\s*("[^"]*"|'[^']*')/.exec(text);
+          if (match?.[1] !== undefined) {
+            push('cssContent', match[1].slice(1, -1));
+          }
+        }
+      }
+
+      // Noscript blocks.
+      for (const el of Array.from(document.querySelectorAll('noscript'))) {
+        const text = (el.textContent ?? '').trim();
+        if (text.length > 0) push('noscript', text.slice(0, 2000));
+      }
+
+      // Hidden form fields with suspicious names.
+      for (const el of Array.from(document.querySelectorAll('input[type="hidden"]'))) {
+        const name = el.getAttribute('name') ?? '';
+        if (/token|secret|key|password|pass|auth|credit|ssn|card/i.test(name)) {
+          push('hiddenFields', { name, value: (el.getAttribute('value') ?? '').slice(0, 200) });
+        }
+      }
+
+      return out;
+    })
+    .catch(() => undefined);
+
+  if (raw === undefined) {
+    return {
+      hiddenText: [],
+      ariaHiddenText: [],
+      comments: [],
+      attributes: [],
+      cssContent: [],
+      noscript: [],
+      hiddenFields: [],
+    };
+  }
+
+  return raw as unknown as DomScanInput;
 }
 
 /** The action kinds the daemon accepts. */
@@ -56,6 +231,14 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
   const userAgent = buildUserAgent(options.contactUrl);
   let session: BrowserSession | undefined;
 
+  // The safety layer. The policy is loaded once at start-up; the plan-lock
+  // and the approval store live for the life of the daemon, so an approval
+  // issued in one CLI call is usable in the next.
+  const policy: Policy = await loadPolicy(options.cwd);
+  const planLock = new PlanLock();
+  const approvals = new ApprovalStore();
+  const scanner = new InjectionScanner();
+
   const getSession = async (): Promise<BrowserSession> => {
     if (session === undefined) {
       session = new BrowserSession({
@@ -68,6 +251,9 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
     return session;
   };
 
+  /* eslint-disable @typescript-eslint/require-await -- some handlers are
+   * genuinely synchronous but must return a Promise to match the handler
+   * type. */
   const handlers: Record<string, DaemonHandler> = {
     snapshot: async (request: DaemonRequest) => {
       const s = await getSession();
@@ -94,6 +280,145 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
       };
     },
 
+    // --- The plan-lock ----------------------------------------------------
+    'plan.set': async (request: DaemonRequest) => {
+      const params = request.params ?? {};
+      const raw = params['plan'];
+      const parsed = PlanSchema.safeParse(raw);
+      if (!parsed.success) {
+        const issues = parsed.error.issues
+          .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+          .join('; ');
+        return {
+          data: { ok: false, error: `the plan is not valid: ${issues}` },
+          exitCode: EXIT.USAGE,
+        };
+      }
+      planLock.set(parsed.data);
+      return {
+        data: {
+          ok: true,
+          plan: parsed.data,
+          message: `plan set: ${parsed.data.goal}`,
+        },
+      };
+    },
+
+    'plan.show': async () => ({
+      data: { plan: planLock.current },
+    }),
+
+    'plan.amend': async (request: DaemonRequest) => {
+      const params = request.params ?? {};
+      const patch = params['patch'];
+      const current = planLock.current;
+      if (current === undefined) {
+        return {
+          data: { ok: false, error: 'no plan is set' },
+          exitCode: EXIT.FAILURE,
+        };
+      }
+
+      const p = (patch ?? {}) as {
+        goal?: string;
+        maxSteps?: number;
+        addOrigins?: string[];
+        addClasses?: string[];
+      };
+
+      const amended: Plan = {
+        ...current,
+        ...(p.goal !== undefined ? { goal: p.goal } : {}),
+        ...(p.maxSteps !== undefined ? { maxSteps: p.maxSteps } : {}),
+        allowedOrigins: [
+          ...current.allowedOrigins,
+          ...(p.addOrigins ?? []).filter((o) => !current.allowedOrigins.includes(o)),
+        ],
+        allowedActionClasses: [
+          ...current.allowedActionClasses,
+          ...(p.addClasses ?? []).filter(
+            (c): c is Plan['allowedActionClasses'][number] =>
+              ACTION_CLASS_SET.has(c) &&
+              !current.allowedActionClasses.includes(c as Plan['allowedActionClasses'][number]),
+          ),
+        ],
+      };
+
+      // An amendment widens what the agent may do, so it needs an approval
+      // that was issued for exactly this amendment. The approval is bound to
+      // the hash of the amendment, so a token issued for one amendment
+      // cannot be used for another.
+      const hash = hashAction({
+        kind: 'plan.amend',
+        target: JSON.stringify(amended),
+      });
+
+      const token = params['approvalToken'];
+      if (typeof token !== 'string') {
+        // No token: record the request so a human can approve it.
+        const request = approvals.request({
+          actionId: hash,
+          actionHash: hash,
+          description: `amend the plan to: ${amended.goal}`,
+        });
+        return {
+          data: {
+            ok: false,
+            error: 'amending a plan requires an approval',
+            approvalId: request.actionId,
+            approvalDescription: request.description,
+          },
+          exitCode: EXIT.NEEDS_APPROVAL,
+        };
+      }
+
+      const consumed = approvals.consume(token, { actionId: hash, actionHash: hash });
+      if (!consumed.ok) {
+        return {
+          data: { ok: false, error: consumed.reason, ruleId: consumed.ruleId },
+          exitCode: EXIT.POLICY_DENIED,
+        };
+      }
+
+      const result = planLock.amend(amended, { approved: true });
+      if (!result.ok) {
+        return {
+          data: { ok: false, error: result.reason },
+          exitCode: EXIT.POLICY_DENIED,
+        };
+      }
+      return {
+        data: { ok: true, plan: result.plan, message: `plan amended: ${result.plan.goal}` },
+      };
+    },
+
+    // --- Approvals --------------------------------------------------------
+    'approve.issue': async (request: DaemonRequest) => {
+      const params = request.params ?? {};
+      const actionId = params['actionId'];
+      if (typeof actionId !== 'string') {
+        return {
+          data: { ok: false, error: 'actionId is required' },
+          exitCode: EXIT.USAGE,
+        };
+      }
+      const pending = approvals.getPending(actionId);
+      if (pending === undefined) {
+        return { data: { ok: false, error: `no pending action with id ${actionId}` } };
+      }
+      const token = approvals.issue(actionId);
+      if (token === undefined) {
+        return { data: { ok: false, error: `could not issue a token for ${actionId}` } };
+      }
+      return {
+        data: { ok: true, token: token.token, description: pending.description },
+      };
+    },
+
+    'approve.list': async () => ({
+      data: { pending: approvals.listPending() },
+    }),
+
     act: async (request: DaemonRequest) => {
       const s = await getSession();
       const params = request.params ?? {};
@@ -111,6 +436,83 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
           : parseTarget(typeof targetInput === 'string' ? targetInput : '');
 
       const value = typeof params['value'] === 'string' ? params['value'] : undefined;
+
+      // --- The safety gate -------------------------------------------------
+      // Every action passes through the gate before it happens. The gate is
+      // the only place a refusal can come from, so no code path can perform
+      // an unchecked action.
+      const page = await s.page();
+      const facts = await inspectTarget(page, target);
+      const currentUrl = page.url();
+
+      // The value is tainted when it came from the page rather than from the
+      // operator's own command line.
+      const tainted = value !== undefined && isTainted(value);
+
+      // The sink is determined by the field the value would go into.
+      const sink = sinkForField({
+        ...(facts.role !== undefined ? { role: facts.role } : {}),
+        ...(facts.name !== undefined ? { name: facts.name } : {}),
+        ...(facts.inputType !== undefined ? { inputType: facts.inputType } : {}),
+      });
+
+      // The injection findings for the node the action targets.
+      const findings: Finding[] = await scanForFindings(s, scanner);
+
+      const verdict = evaluateAction(
+        {
+          intent: {
+            kind,
+            ...(value !== undefined ? { value } : {}),
+            ...(facts.role !== undefined ? { role: facts.role } : {}),
+            ...(facts.name !== undefined ? { name: facts.name } : {}),
+            ...(facts.text !== undefined ? { text: facts.text } : {}),
+            ...(facts.inputType !== undefined ? { inputType: facts.inputType } : {}),
+            ...(facts.isFileInput !== undefined ? { isFileInput: facts.isFileInput } : {}),
+            ...(facts.inForm !== undefined ? { inForm: facts.inForm } : {}),
+            ...(facts.formMethod !== undefined ? { formMethod: facts.formMethod } : {}),
+            ...(target.ref !== undefined ? { ref: target.ref } : {}),
+            ...(target.css !== undefined ? { css: target.css } : {}),
+            ...(target.label !== undefined ? { label: target.label } : {}),
+            ...(kind === 'goto' ? { url: target.css ?? '' } : {}),
+          },
+          currentUrl,
+          tainted,
+          ...(sink !== undefined ? { sink } : {}),
+          ...(target.ref !== undefined ? { targetRef: target.ref } : {}),
+          findings,
+          interactive: options.headed,
+          ...(typeof params['approvalToken'] === 'string'
+            ? { approvalToken: params['approvalToken'] }
+            : {}),
+        },
+        { policy, planLock, approvals },
+      );
+
+      if (!verdict.allowed) {
+        const exitCode =
+          verdict.next === 'needs_approval' ? EXIT.NEEDS_APPROVAL : EXIT.POLICY_DENIED;
+        return {
+          data: {
+            ok: false,
+            denied: true,
+            next: verdict.next,
+            actionClass: verdict.actionClass,
+            reasons: verdict.reasons,
+            ruleIds: verdict.ruleIds,
+            ...(verdict.approval !== undefined
+              ? {
+                  approvalId: verdict.approval.actionId,
+                  approvalDescription: verdict.approval.description,
+                }
+              : {}),
+          },
+          exitCode,
+        };
+      }
+
+      planLock.recordStep();
+
       const outcome = await s.act({
         kind: kind as ActionKind,
         target,

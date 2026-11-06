@@ -8,7 +8,8 @@
  * It is deliberately separate from the HTTP layer so it can be driven
  * in-process by tests.
  */
-import { chromium, type Browser, type ConsoleMessage, type Page } from 'playwright';
+import type { Browser, ConsoleMessage, Page } from 'playwright';
+import { launchChromium } from './browser.js';
 import { SessionState, type TabInfo } from './contexts.js';
 import type { RunStore, StepRecord } from './runstore/store.js';
 import { normalizeSnapshot, type AxNode, type Snapshot } from '../perception/snapshot.js';
@@ -90,8 +91,7 @@ export class BrowserSession {
   /** Launch the browser. */
   async launch(): Promise<void> {
     if (this.browser !== undefined) return;
-    const launcher = chromium;
-    this.browser = await launcher.launch({ headless: !this.headed });
+    this.browser = await launchChromium({ headed: this.headed });
     this.state = new SessionState(this.browser);
   }
 

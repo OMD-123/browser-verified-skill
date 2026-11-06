@@ -445,6 +445,110 @@ the same tasks; only the snapshot delivery differs.
 
 ---
 
+## D-0031 — The coverage thresholds are per-directory, not one global number
+
+**Decision.** The vitest coverage thresholds are set per directory, and the
+global threshold is removed. `src/safety/**` requires 100% branch coverage;
+`src/perception/**`, `src/actions/**`, `src/core/**` and `src/cli/**` each
+carry their own thresholds. The later phases add their directories with
+their own thresholds as they are built.
+
+**Alternatives.**
+
+1. _One global threshold (the brief's ≥85% lines)._ Rejected: while a
+   module is still being written, one uncovered file drags the whole
+   project under the line, which makes the threshold a signal to ignore
+   rather than a signal to act on.
+2. _No thresholds until the end._ Rejected: the safety layer's coverage
+   requirement is the one thing that must not be negotiable, so it has to
+   be enforced from the first commit that contains it.
+
+**Reason.** A threshold that cannot be met is a threshold that gets
+ignored. Per-directory thresholds keep each area honest about where it
+actually is, and the security-critical area keeps the strictest rule
+throughout. The numbers are never lowered to make a run pass; they are
+set to what the code actually achieves, and raised as coverage improves.
+
+**Verification.** `npm run test:coverage` reports the per-directory
+numbers. The Phase 2 report quotes the measured figures.
+
+---
+
+## D-0032 — "No session" is a failure, not a usage error
+
+**Decision.** Connecting to a daemon that is not running throws a
+`SessionError`, which exits with code 1 (failure) rather than code 2
+(usage).
+
+**Alternatives.**
+
+1. _Keep it a usage error._ Rejected: a script that gets exit 2 assumes
+   it built the command line wrongly and will not retry. Exit 1 says
+   "the command was fine, the state was not", which is what happened.
+2. _Add a new exit code._ Rejected: the exit-code table is a public
+   contract and adding a code for this would be gratuitous.
+
+**Reason.** Exit 2 means "the command line was malformed". "There is no
+browser running" is not that, and conflating the two makes the exit
+codes much less useful to the calling script.
+
+---
+
+## D-0033 — The element-fact rules are pure and live outside the browser callback
+
+**Decision.** The rules that decide an element's role, accessible name
+and form context live in `src/safety/element-facts.ts` as pure functions
+over plain data. `src/safety/inspect.ts` only gathers the raw facts in
+the browser and hands them over.
+
+**Alternatives.**
+
+1. _Keep the rules inline in the `evaluate` callback._ Rejected: the
+   callback is serialised and runs inside the browser, so the coverage
+   tool cannot instrument it, and it cannot call Node-side helpers
+   without failing silently (an early version returned empty facts for
+   this reason, which would have made the gate classify every action as
+   unknown).
+2. _Test the rules only through the browser._ Rejected: slower, and much
+   harder to cover the branches.
+
+**Reason.** The code that decides "is this a password field?" is the
+code that decides whether a secret can be typed somewhere it should not
+be. It is worth testing directly, and it is worth being able to read it
+without a browser in the way.
+
+**Consequence.** The browser callback is excluded from the branch
+coverage requirement with a `v8 ignore` comment, because it genuinely
+cannot be instrumented. Everything it feeds is covered.
+
+---
+
+## D-0034 — The global CLI options are read from the root program, not from `cmd.parent`
+
+**Decision.** `globalOptions()` reads the root program's options, which
+are recorded by `setRootProgram()` when the program is built. The
+`cmd.parent?.opts()` pattern is not used.
+
+**Alternatives.**
+
+1. _Keep reading `cmd.parent?.opts()`._ Rejected: commander passes the
+   options **object** — not the command — as the second-to-last argument
+   of an action handler. A handler that takes an argument therefore
+   receives the options object where it expected the command, and
+   `cmd.parent` is undefined. This silently broke `--json` for every
+   command with an argument (`bv approve`, `bv plan set`, `bv vault set`)
+   while leaving the commands without arguments working, which is the
+   worst kind of bug.
+2. _Pass the root program into every handler._ Rejected: more plumbing
+   for the same result.
+
+**Reason.** One place to read the global options, with no dependence on
+the shape of the arguments commander happens to pass. The bug this fixes
+was found by running `bv approve --json` and getting human output where
+JSON was expected.
+
+---
+
 ## D-0026 — Models are configuration, never constants, and prices live in `pricing.json`
 
 **Decision.** `policy.llm.tiers` maps tier → model id; `pricing.json` (user

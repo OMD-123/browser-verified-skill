@@ -5,7 +5,8 @@
  * global setup. No public-internet access.
  */
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
+import { launchChromium } from '../../src/core/browser.js';
 import { normalizeSnapshot } from '../../src/perception/snapshot.js';
 import { diffSnapshots } from '../../src/perception/diff.js';
 import { renderDiff, renderTree } from '../../src/perception/render.js';
@@ -35,7 +36,7 @@ describe('perception and actions (e2e)', () => {
   let page: Page;
 
   beforeAll(async () => {
-    browser = await chromium.launch({ headless: true });
+    browser = await launchChromium();
     page = await browser.newPage();
   });
 

@@ -13,7 +13,8 @@ import { registerDoctor } from './commands/doctor.js';
 import { registerInit } from './commands/init.js';
 import { registerSession } from './commands/session.js';
 import { registerPerception } from './commands/perception.js';
-import { globalOptions } from './helpers.js';
+import { registerSafety } from './commands/safety.js';
+import { globalOptions, emittedCode, setRootProgram } from './helpers.js';
 
 /** Global options every command inherits from the root program. */
 export interface GlobalOptions {
@@ -43,6 +44,12 @@ export function buildProgram(): Command {
   registerInit(program);
   registerSession(program);
   registerPerception(program);
+  registerSafety(program);
+
+  // The global options live on the root program. Recording it here means
+  // every command can read them without relying on the shape of the
+  // arguments commander passes to an action handler.
+  setRootProgram(program);
 
   return program;
 }
@@ -124,7 +131,8 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
 
   // If a command already printed its own output, do not print it again.
-  if (handled) return result.code;
+  // Its exit code was recorded by `emit`.
+  if (handled) return emittedCode ?? result.code;
 
   const opts = globalOptions(program);
   printResult(result, {

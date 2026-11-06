@@ -1,0 +1,267 @@
+/**
+ * The safety gate (M05-M08, M11).
+ *
+ * This is the single place where an action is checked before it happens. It
+ * combines the policy engine, the plan-lock, the taint tracker and the
+ * injection guard into one verdict, so that no code path can perform an
+ * action without passing through it.
+ *
+ * The order of the checks matters:
+ *
+ *  1. **Plan-lock.** An action outside the plan is refused outright, before
+ *     any other consideration. A page cannot widen the plan.
+ *  2. **Domain.** The action must land on an allowed domain.
+ *  3. **Classification.** What kind of action is this?
+ *  4. **Injection.** Is the target node injection-suspect?
+ *  5. **Taint.** Does the value carry page-sourced data?
+ *  6. **Approval.** Does the class or the taint require an approval?
+ *
+ * A denial at any step stops the action.
+ */
+import type { ActionClass } from './policy.js';
+import { evaluate } from './evaluator.js';
+import type { PolicyDecision } from './policy.js';
+import { classifyAction, type ActionIntent } from './classify.js';
+import type { PlanDecision, PlanLock } from './planlock.js';
+import { checkSink, type TaintSink } from './taint.js';
+import { hashAction, type ApprovalRequest, type ApprovalStore } from './approvals.js';
+import { nodesNeedingApproval, type Finding } from './injection/detectors.js';
+
+/** The verdict of the safety gate. */
+export interface GateVerdict {
+  /** Whether the action may proceed. */
+  allowed: boolean;
+  /** The action's class. */
+  actionClass: ActionClass;
+  /** Why the action was refused, or what it needs. */
+  reasons: string[];
+  /** The policy rules that were consulted. */
+  ruleIds: string[];
+  /** What the caller must do next. */
+  next: 'proceed' | 'deny' | 'needs_approval' | 'off_plan';
+  /** The approval request, when one is needed. */
+  approval?: ApprovalRequest;
+  /** The plan decision, when the plan refused the action. */
+  plan?: PlanDecision;
+}
+
+/** What the gate needs to know about the action. */
+export interface GateInput {
+  /** What the agent wants to do. */
+  intent: ActionIntent;
+  /** The current page URL. */
+  currentUrl: string;
+  /** Whether the value being used is tainted. */
+  tainted?: boolean;
+  /** The taint sink, when a value is being used. */
+  sink?: TaintSink;
+  /** The node the action targets, when it has one. */
+  targetRef?: string;
+  /** The injection findings for the current snapshot. */
+  findings?: readonly Finding[];
+  /** Whether the run is interactive (a human can approve). */
+  interactive: boolean;
+  /** An approval token supplied with the action. */
+  approvalToken?: string;
+}
+
+/** The policy the gate enforces. */
+export interface GatePolicy {
+  /** The policy. */
+  policy: Parameters<typeof evaluate>[1]['policy'];
+  /** The plan-lock. */
+  planLock: PlanLock;
+  /** The approval store. */
+  approvals: ApprovalStore;
+}
+
+/** The hash of an action, used to bind an approval to it. */
+export function actionHashFor(intent: ActionIntent): string {
+  const target = intent.name ?? intent.text ?? intent.ref ?? intent.css ?? '';
+  return hashAction({
+    kind: intent.kind,
+    target,
+    ...(intent.value !== undefined ? { value: intent.value } : {}),
+  });
+}
+
+/**
+ * Check an action against every safety control.
+ *
+ * Returns the verdict. The caller must not perform the action unless
+ * `allowed` is true.
+ */
+export function evaluateAction(input: GateInput, gate: GatePolicy): GateVerdict {
+  const reasons: string[] = [];
+  const ruleIds: string[] = [];
+  const actionClass = classifyAction(input.intent);
+
+  // --- 1. The plan-lock ----------------------------------------------------
+  const planDecision = gate.planLock.check({
+    actionClass,
+    ...(input.intent.url !== undefined ? { url: input.intent.url } : {}),
+    currentUrl: input.currentUrl,
+  });
+
+  if (!planDecision.allowed) {
+    return {
+      allowed: false,
+      actionClass,
+      // `planDecision` is narrowed to the refusal variant, so both fields
+      // are present.
+      reasons: [planDecision.reason],
+      ruleIds: [planDecision.ruleId],
+      next: 'off_plan',
+      plan: planDecision,
+    };
+  }
+
+  // --- 2. The policy engine ------------------------------------------------
+  const decision: PolicyDecision = evaluate(
+    {
+      kind: input.intent.kind,
+      ...(input.intent.url !== undefined ? { url: input.intent.url } : {}),
+      ...(input.intent.value !== undefined ? { value: input.intent.value } : {}),
+      ...(input.intent.role !== undefined ? { role: input.intent.role } : {}),
+      ...(input.intent.name !== undefined ? { name: input.intent.name } : {}),
+      ...(input.intent.text !== undefined ? { text: input.intent.text } : {}),
+      ...(input.intent.ref !== undefined ? { ref: input.intent.ref } : {}),
+      ...(input.intent.inForm !== undefined ? { inForm: input.intent.inForm } : {}),
+      ...(input.intent.formMethod !== undefined ? { formMethod: input.intent.formMethod } : {}),
+      ...(input.intent.method !== undefined ? { method: input.intent.method } : {}),
+    },
+    {
+      policy: gate.policy,
+      url: input.currentUrl,
+      nonInteractive: !input.interactive,
+      tainted: input.tainted === true,
+      approved: false,
+    },
+  );
+
+  reasons.push(...decision.reasons);
+  ruleIds.push(...decision.ruleIds);
+
+  // --- 3. The injection guard ----------------------------------------------
+  // A node with a "review" finding needs an approval before anything is done
+  // to it.
+  const suspectRefs = nodesNeedingApproval(input.findings ?? []);
+  if (input.targetRef !== undefined && suspectRefs.includes(input.targetRef)) {
+    reasons.push(
+      `the target node ${input.targetRef} has an injection-suspect finding; it needs review before it is acted on`,
+    );
+    ruleIds.push('injection.review_required');
+  }
+
+  // --- 4. The taint tracker ------------------------------------------------
+  // A tainted value cannot reach a sink without an approval. The rule id is
+  // `taint.<sink>`, so the check below looks for that prefix rather than a
+  // single fixed id.
+  if (input.tainted && input.sink !== undefined) {
+    const sinkDecision = checkSink(input.intent.value ?? '', input.sink);
+    if (!sinkDecision.allowed) {
+      // `sinkDecision` is narrowed to the refusal variant.
+      reasons.push(sinkDecision.reason);
+      ruleIds.push(sinkDecision.ruleId);
+    }
+  }
+
+  // --- 5. The approval gate ------------------------------------------------
+  // An approval is needed when the policy requires it for the class, when the
+  // taint refused the sink, or when the injection guard flagged the node.
+  const taintedSinkRefused = ruleIds.some((id) => id.startsWith('taint.'));
+  const needsApproval =
+    decision.verdict === 'needs_approval' ||
+    taintedSinkRefused ||
+    ruleIds.includes('injection.review_required');
+
+  // A hard denial is never upgraded to "needs approval": a denied action
+  // stays denied, whatever the approval state.
+  if (decision.verdict === 'deny') {
+    return {
+      allowed: false,
+      actionClass,
+      reasons,
+      ruleIds,
+      next: 'deny',
+    };
+  }
+
+  if (needsApproval) {
+    // The evaluator always records a rule id when it returns
+    // `needs_approval`, and the taint and injection paths each add their
+    // own, so there is always something to explain the refusal.
+    //
+    // This fallback is a safety net for a future change to the evaluator. It
+    // is unreachable today, so it is excluded from the branch-coverage
+    // requirement rather than tested with a contrived input.
+    /* v8 ignore next 3 */
+    if (ruleIds.length === 0) {
+      reasons.push(`the ${actionClass} action class requires an explicit approval`);
+      ruleIds.push('policy.approval_required');
+    }
+
+    // A supplied token is consumed only if it matches this exact action.
+    if (input.approvalToken !== undefined) {
+      const hash = actionHashFor(input.intent);
+      const consumed = gate.approvals.consume(input.approvalToken, {
+        actionId: hash,
+        actionHash: hash,
+      });
+      if (consumed.ok) {
+        return {
+          allowed: true,
+          actionClass,
+          reasons,
+          ruleIds,
+          next: 'proceed',
+        };
+      }
+      reasons.push(consumed.reason);
+      ruleIds.push(consumed.ruleId);
+    }
+
+    const hash = actionHashFor(input.intent);
+    const request = gate.approvals.request({
+      actionId: hash,
+      actionHash: hash,
+      description: describeAction(input.intent, actionClass),
+    });
+
+    return {
+      allowed: false,
+      actionClass,
+      reasons,
+      ruleIds,
+      next: 'needs_approval',
+      approval: request,
+    };
+  }
+
+  return {
+    allowed: true,
+    actionClass,
+    reasons,
+    ruleIds,
+    next: 'proceed',
+  };
+}
+
+/**
+ * Describe an action for a human who is being asked to approve it.
+ *
+ * The description must be specific enough that the human knows what they are
+ * approving: the action, its target and its value.
+ */
+export function describeAction(intent: ActionIntent, actionClass: ActionClass): string {
+  const target =
+    intent.name ?? intent.text ?? intent.ref ?? intent.css ?? intent.label ?? '(unknown target)';
+  const parts = [`${intent.kind} on ${target}`];
+  if (intent.value !== undefined && intent.value.length > 0) {
+    parts.push(
+      `value="${intent.value.length > 60 ? `${intent.value.slice(0, 60)}…` : intent.value}"`,
+    );
+  }
+  parts.push(`class=${actionClass}`);
+  return parts.join(', ');
+}

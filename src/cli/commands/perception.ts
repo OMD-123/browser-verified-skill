@@ -50,6 +50,20 @@ interface ActPayload {
   urlAfter: string;
   diff: string;
   step: { step: number; snapshotPath?: string };
+  /** Set when the safety gate refused the action. */
+  denied?: boolean;
+  /** What the gate wants next. */
+  next?: 'proceed' | 'deny' | 'needs_approval' | 'off_plan';
+  /** The action class the gate classified it as. */
+  actionClass?: string;
+  /** Why the gate refused it. */
+  reasons?: string[];
+  /** The policy rules that were consulted. */
+  ruleIds?: string[];
+  /** The id of the pending approval, when one is needed. */
+  approvalId?: string;
+  /** What the approval would allow. */
+  approvalDescription?: string;
 }
 
 /** Register the perception and action commands. */
@@ -102,12 +116,13 @@ export function registerPerception(program: Command): void {
     .argument('[value]', 'the value to type, fill, select, press or upload')
     .option('--dry-run', 'report what would happen without doing it', false)
     .option('--force', 'skip actionability checks', false)
+    .option('--approve <token>', 'an approval token for this exact action')
     .action(
       async (
         kind: string,
         target: string,
         value: string | undefined,
-        options: { dryRun?: boolean; force?: boolean },
+        options: { dryRun?: boolean; force?: boolean; approve?: string },
         cmd: Command,
       ) => {
         const global = globalOptions(cmd);
@@ -146,7 +161,31 @@ export function registerPerception(program: Command): void {
             target: descriptor,
             ...(value !== undefined ? { value } : {}),
             force: options.force === true,
+            ...(typeof options.approve === 'string' ? { approvalToken: options.approve } : {}),
           });
+
+          // A refusal from the safety gate is reported differently from a
+          // failed action: the action never happened, and the reason says
+          // why.
+          if (payload.denied === true) {
+            const lines = [
+              `refused: ${payload.reasons?.join('; ') ?? 'the policy did not allow this action'}`,
+              `class: ${payload.actionClass ?? 'unknown'}`,
+              ...(payload.ruleIds !== undefined && payload.ruleIds.length > 0
+                ? [`rules: ${payload.ruleIds.join(', ')}`]
+                : []),
+              ...(payload.approvalId !== undefined
+                ? [
+                    `approval id: ${payload.approvalId}`,
+                    `run \`bv approve ${payload.approvalId}\` to approve this exact action`,
+                  ]
+                : []),
+            ];
+            const code =
+              payload.next === 'needs_approval' ? EXIT.NEEDS_APPROVAL : EXIT.POLICY_DENIED;
+            emit(cmd, fail(payload, lines, code));
+            return;
+          }
 
           const lines = [
             payload.ok ? `ok: ${payload.message}` : `failed: ${payload.message}`,

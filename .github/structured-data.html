@@ -1,0 +1,139 @@
+<script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://github.com/OMD-123/browser-verified#software",
+        "name": "browser-verified",
+        "alternateName": "bv",
+        "description": "Browser automation with evidence: diffed snapshots, prompt-injection defenses, compiled Playwright scripts, and self-healing locators.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "softwareVersion": "0.1.0",
+        "license": "https://opensource.org/licenses/MIT",
+        "codeRepository": "https://github.com/OMD-123/browser-verified",
+        "programmingLanguage": {
+          "@type": "ComputerLanguage",
+          "name": "TypeScript"
+        },
+        "runtimePlatform": "Node.js 20+",
+        "author": {
+          "@type": "Person",
+          "name": "Om Dandagvhal",
+          "url": "https://github.com/OMD-123"
+        },
+        "maintainer": {
+          "@type": "Person",
+          "name": "Om Dandagvhal",
+          "url": "https://github.com/OMD-123"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Accessibility-tree diffing to cut LLM token cost",
+          "Machine-checked success conditions with screenshot and network evidence",
+          "Compilation of a run into a plain Playwright TypeScript script",
+          "Self-healing locator chains with drift reporting",
+          "Prompt-injection detection with a nonce-tagged untrusted-content envelope",
+          "Taint tracking across page, network, file and model boundaries",
+          "Policy engine with an approval gate and plan-lock",
+          "AES-256-GCM secrets vault with redaction at every sink",
+          "Network dry-run that intercepts state-changing requests",
+          "robots.txt compliance, per-domain rate limiting and human handoff",
+          "Model Context Protocol server exposing the same policy engine"
+        ],
+        "keywords": "browser automation, playwright, AI agent, prompt injection, self-healing tests, evidence, MCP, web scraping, visual regression"
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://github.com/OMD-123/browser-verified#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does browser-verified need an API key?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No, not for its primary mode. Mode A is host-driven: a host agent such as Claude Code calls bv commands itself, and bv needs no LLM and no API key. Mode B (bv run --goal) is the optional autonomous planner/executor/verifier loop and does require ANTHROPIC_API_KEY. Without a key, Mode B exits with a clear error and Mode A is unaffected."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is browser-verified a stealth browser?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. browser-verified deliberately implements no stealth, fingerprint-spoofing, CAPTCHA-solving or proxy-rotation capability. The user agent is honest (BrowserVerified/<version> (+<contact-url>)), navigator.webdriver is not masked, and a policy that requests any of those capabilities fails to load with a clear error. CAPTCHA, login-wall and 2FA challenges trigger a human handoff instead of being solved."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does browser-verified protect against prompt injection?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "All page-derived text is wrapped in a per-call nonce envelope before it reaches a model: <untrusted_web_content origin=\"...\" nonce=\"<16 hex>\"> ... </untrusted_web_content nonce=\"<same>\">. The nonce is regenerated per call and forged closing tags are escaped. Detectors flag hidden text, aria-hidden content, HTML comments, zero-width and bidi characters, poisoned alt/title/aria-label/placeholder attributes, CSS content:, fake system banners, base64 blobs and exfiltration-style URLs. A finding of severity review requires approval before acting on the node; severity block redacts the node's text."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does browser-verified actually verify?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Every run ends with a success condition from a small DSL: url_matches, text_visible, element, network_response, storage, or compositions of all, any and not. Deterministic conditions are evaluated in-process with no model call. The run then produces evidence: a final screenshot, the full snapshot, per-condition results and network facts. A run that does not satisfy the condition is reported as unverified, never as done."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does browser-verified reduce LLM token cost?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It returns a structural diff of the page's accessibility tree rather than the whole tree. Nodes are matched on role, accessible name and a stable ref, with a loose-identity fallback so a ref change after a navigation is reported as a change instead of a removal plus an addition. Long sibling runs are collapsed, long text is truncated with an explicit marker, and a token budget can be applied. On the project's fixture signup form, a one-field fill produces a diff under 15 percent of the full tree size."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does the compiled Playwright script look like?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "bv compile <runId> --out flows/x.spec.ts emits a readable TypeScript file that imports playwright directly and has no runtime dependency on bv. Named variables become parameters, the best locator is emitted first with fallbacks as comments, and assertions are inferred from observed post-conditions such as a URL change, a new dialog or toast, or a count delta, while skipping volatile values like timestamps and IDs. bv replay runs it deterministically at zero LLM cost."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does self-healing work in browser-verified?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Every action records which locator strategy succeeded, following the chain ref, role plus name, label, text, test-id, CSS. When a locator fails, the fallback chain runs. If it still fails, Mode A returns a structured failure to the host agent and Mode B asks the model to fix only that step. A successful heal updates the intermediate representation, recompiles the flow and emits a drift entry such as Step 4: #login to button[name=signin]. The bv drift command lists them."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is browser-verified compatible with the Model Context Protocol?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The bv mcp command exposes snapshot, act, verify, extract, compile and replay over MCP. The MCP path runs the same policy engine as the CLI, so no MCP route can bypass a policy check."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What are browser-verified's known limitations?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The prompt-injection guard is heuristic and will miss novel attacks; the project measures this against a 25-plus page red-team pack and publishes the misses. The rewind command restores cookies, storage state and navigation but cannot restore in-page JavaScript state or server-side state. Trace redaction is text substitution and can miss secrets embedded in binary resources. Token counts in the benchmark table are estimates using characters divided by four unless an API key is present to count them exactly."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Where does browser-verified store its data?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Everything runtime lives in a .bv directory in the current working directory, which is gitignored. It contains policy.yaml, the AES-256-GCM encrypted vault.enc, a playbooks.sqlite site-memory database, and a runs directory holding audit.jsonl, trace.zip, network.har, result.json and per-step artifacts. Nothing under .bv should ever be committed."
+            }
+          }
+        ]
+      }
+    ]
+  }
+</script>
