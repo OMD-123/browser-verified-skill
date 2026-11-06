@@ -39,6 +39,11 @@ export interface FrameInfo {
  * one or more pages (tabs).
  */
 export class SessionState {
+  /** The URL of the active page, when there is one. */
+  currentUrl(): string | undefined {
+    return this.pages[this.activeIndex]?.url();
+  }
+
   readonly browser: Browser;
   context: BrowserContext | undefined;
   pages: Page[] = [];

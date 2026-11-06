@@ -75,6 +75,34 @@ export async function replay(
     const stepStarted = Date.now();
     const attempted: string[] = [];
 
+    // A `goto` has no target: it navigates.
+    if (step.kind === 'goto') {
+      try {
+        const url = resolveValue(step.params.value, options.variables ?? {}) ?? step.pre.url;
+        await page.goto(url);
+        results.push({
+          index: step.index,
+          ok: true,
+          strategy: 'goto',
+          attempted: [url],
+          durationMs: Date.now() - stepStarted,
+          urlAfter: page.url(),
+          healed: false,
+        });
+      } catch (err) {
+        results.push({
+          index: step.index,
+          ok: false,
+          attempted: [],
+          message: err instanceof Error ? err.message : String(err),
+          durationMs: Date.now() - stepStarted,
+          urlAfter: page.url(),
+          healed: false,
+        });
+      }
+      continue;
+    }
+
     // Try the **primary** locator first.
     let locator = undefined;
     let strategy: string | undefined;

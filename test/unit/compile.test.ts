@@ -307,7 +307,9 @@ describe('the compiler', () => {
 
   it('emits a plain Playwright script', () => {
     const script = renderScript(compileFlow(run()));
-    expect(script).toContain("import { test, expect, type Page } from '@playwright/test';");
+    expect(script).toContain(
+      "import { test, expect, type Page, type Locator } from '@playwright/test';",
+    );
     expect(script).toContain("test('flow'");
   });
 

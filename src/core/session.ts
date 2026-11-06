@@ -13,6 +13,7 @@ import { launchChromium } from './browser.js';
 import { SessionState, type TabInfo } from './contexts.js';
 import type { RunStore, StepRecord } from './runstore/store.js';
 import { normalizeSnapshot, type AxNode, type Snapshot } from '../perception/snapshot.js';
+import type { NetworkFact } from '../verify/verifier.js';
 import { diffSnapshots, type SnapshotDiff } from '../perception/diff.js';
 import { pruneSnapshot, estimateTreeTokens } from '../perception/prune.js';
 import { renderDiff, renderTree } from '../perception/render.js';
@@ -86,6 +87,43 @@ export class BrowserSession {
     this.onClose = options.onClose;
     this.browser = undefined;
     this.state = undefined;
+  }
+
+  /**
+ * The network responses seen in this session.
+ *
+ * The verifier uses these for the `network_response` condition.
+ */
+networkFacts: NetworkFact[] = [];
+
+  /** The current URL, when the browser is running. */
+  get currentUrl(): string | undefined {
+    return this.state?.currentUrl();
+  }
+
+  /**
+   * The storage state, as a flat map of key to value.
+   *
+   * Local storage and session storage are read; cookies are not included
+   * because their values are secrets and are masked elsewhere.
+   */
+  async storageSnapshot(): Promise<Record<string, string>> {
+    const page = await this.page();
+    const storage = await page
+      .evaluate(() => {
+        const result: Record<string, string> = {};
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key !== null) result[`local:${key}`] = window.localStorage.getItem(key) ?? '';
+        }
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const key = window.sessionStorage.key(i);
+          if (key !== null) result[`session:${key}`] = window.sessionStorage.getItem(key) ?? '';
+        }
+        return result;
+      })
+      .catch(() => ({}));
+    return storage;
   }
 
   /** Launch the browser. */

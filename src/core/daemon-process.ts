@@ -26,6 +26,14 @@ import {
   type DomScanInput,
   type Finding,
 } from '../safety/injection/detectors.js';
+import { verify } from '../verify/verifier.js';
+import { summarizeVerification } from '../verify/evidence.js';
+import { extract } from '../verify/extract.js';
+import { replay, renderReplay } from '../compile/replay.js';
+import { Recorder, candidatesFor, diffText, readPageText } from '../compile/recorder.js';
+import type { StepKind as RecorderStepKind } from '../compile/ir.js';
+import { readRun } from './runstore/store.js';
+import type { Condition } from '../safety/planlock.js';
 
 /** Options for the daemon process. */
 export interface DaemonProcessOptions {
@@ -39,6 +47,16 @@ export interface DaemonProcessOptions {
   contactUrl?: string;
   /** The run id. Generated when not supplied. */
   runId?: string;
+}
+
+/**
+ * The type of a condition, for the run result.
+ */
+function describeType(condition: Condition): string {
+  if ('all' in condition) return 'all';
+  if ('any' in condition) return 'any';
+  if ('not' in condition) return 'not';
+  return condition.type;
 }
 
 /**
@@ -238,6 +256,8 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
   const planLock = new PlanLock();
   const approvals = new ApprovalStore();
   const scanner = new InjectionScanner();
+  // The recorder writes the IR that `bv compile` reads.
+  const recorder = new Recorder(runId);
 
   const getSession = async (): Promise<BrowserSession> => {
     if (session === undefined) {
@@ -419,6 +439,104 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
       data: { pending: approvals.listPending() },
     }),
 
+    // --- Verification ----------------------------------------------------
+    verify: async (request: DaemonRequest) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const condition = params['condition'] as Condition;
+
+      const page = await s.page();
+      const network = s.networkFacts;
+      const storage = await s.storageSnapshot();
+
+      const result = await verify(condition, {
+        page,
+        ...(network !== undefined ? { network } : {}),
+        ...(storage !== undefined ? { storage } : {}),
+      });
+
+      // A run that did not verify is `unverified`, never "done".
+      await store.writeResult({
+        runId,
+        status: result.passed ? 'verified' : 'unverified',
+        steps: store.stepCount,
+        startedAt: store.started,
+        ...(s.currentUrl !== undefined ? { finalUrl: s.currentUrl } : {}),
+        verification: {
+          passed: result.passed,
+          conditions: result.results.map((item) => ({
+            type: describeType(item.condition),
+            passed: item.passed,
+            detail: item.reason,
+          })),
+        },
+      });
+
+      return {
+        data: {
+          passed: result.passed,
+          results: result.results.map((item) => ({
+            condition: item.condition,
+            passed: item.passed,
+            reason: item.reason,
+          })),
+          evidence: result.evidence,
+          verifiedAt: result.verifiedAt,
+          url: result.url,
+          summary: summarizeVerification(result),
+        },
+        ...(result.passed ? {} : { exitCode: EXIT.VERIFICATION_FAILED }),
+      };
+    },
+
+    // --- Extraction -------------------------------------------------------
+    extract: async (request: DaemonRequest) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const schema = params['schema'];
+
+      const page = await s.page();
+      const result = await extract(page, schema);
+
+      return {
+        data: {
+          fields: result.fields,
+          order: result.order,
+          extractedAt: result.extractedAt,
+          url: result.url,
+        },
+      };
+    },
+
+    // --- Replay ----------------------------------------------------------
+    replay: async (request: DaemonRequest) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const runId = params['runId'];
+      if (typeof runId !== 'string') {
+        return { data: { ok: false, error: 'runId is required' }, exitCode: EXIT.USAGE };
+      }
+
+      const run = await readRun(runId, options.cwd);
+      const page = await s.page();
+      const result = await replay(page, run.steps, {
+        heal: params['heal'] === true,
+        variables: (params['variables'] ?? {}) as Record<string, string>,
+      });
+
+      return {
+        data: {
+          ok: result.ok,
+          steps: result.steps,
+          drift: result.drift.all,
+          healedCount: result.healedCount,
+          durationMs: result.durationMs,
+          summary: renderReplay(result),
+        },
+        ...(result.ok ? {} : { exitCode: EXIT.VERIFICATION_FAILED }),
+      };
+    },
+
     act: async (request: DaemonRequest) => {
       const s = await getSession();
       const params = request.params ?? {};
@@ -513,12 +631,37 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
 
       planLock.recordStep();
 
+      // The text before the action, for the assertions the recorder infers.
+      const textBefore = await readPageText(page);
+
       const outcome = await s.act({
         kind: kind as ActionKind,
         target,
         ...(value !== undefined ? { value } : {}),
         ...(params['force'] === true ? { force: true } : {}),
       });
+
+      // Record the step, so the run can be compiled into a Playwright
+      // script later. A failed action is not recorded: the IR describes
+      // what worked.
+      if (outcome.ok) {
+        const textAfter = await readPageText(page);
+        const changes = diffText(textBefore, textAfter);
+        recorder.record({
+          kind: kind as RecorderStepKind,
+          locators: candidatesFor(target),
+          ...(outcome.strategy !== undefined ? { winningStrategy: outcome.strategy } : {}),
+          ...(value !== undefined ? { value } : {}),
+          pre: { url: outcome.urlBefore },
+          post: {
+            url: outcome.urlAfter,
+            addedText: changes.added,
+            removedText: changes.removed,
+          },
+          durationMs: outcome.durationMs,
+        });
+        await store.writeRecorded(recorder.finish());
+      }
       return {
         data: {
           ok: outcome.ok,
@@ -543,7 +686,25 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
       if (typeof url !== 'string') {
         return { data: { error: 'missing url' }, exitCode: EXIT.USAGE };
       }
+      const page = await s.page();
+      const urlBefore = page.url();
       const result = await s.goto(url);
+
+      // The navigation is recorded as a step, so the compiled script can
+      // replay the flow from the start rather than assuming the page is
+      // already open.
+      if (result.ok) {
+        recorder.record({
+          kind: 'goto',
+          locators: [],
+          value: url,
+          pre: { url: urlBefore },
+          post: { url: result.url },
+          durationMs: 0,
+        });
+        await store.writeRecorded(recorder.finish());
+      }
+
       return {
         data: result,
         ...(result.ok ? {} : { exitCode: EXIT.FAILURE }),

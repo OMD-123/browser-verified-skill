@@ -15,6 +15,7 @@ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { auditPath, runDir, stepDir } from '../paths.js';
+import type { RecordedRun } from '../../compile/ir.js';
 
 /** The status of a run. */
 export type RunStatus = 'running' | 'verified' | 'unverified' | 'failed' | 'stopped';
@@ -80,6 +81,26 @@ export interface RunResult {
   error?: string;
 }
 
+/**
+ * Read a recorded run from the run store.
+ *
+ * Returns the IR as it was written. Throws when the run has no recording,
+ * which is the case for a run that was made before the recorder existed or
+ * that ended before any step succeeded.
+ */
+export async function readRun(
+  runId: string,
+  cwd: string = process.cwd(),
+): Promise<RecordedRun> {
+  const store = new RunStore(runId, cwd);
+  const recorded = (await store.readRecorded()) as RecordedRun | undefined;
+
+  if (recorded === undefined) {
+    throw new Error(`the run ${runId} has no recording. Only runs made with the recorder can be compiled.`);
+  }
+  return recorded;
+}
+
 /** A run id: a timestamp plus a short random suffix, sortable and unique. */
 export function newRunId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
@@ -95,6 +116,7 @@ export class RunStore {
   readonly runId: string;
   readonly cwd: string;
   private readonly startedAt: string;
+  private stepCountValue = 0;
 
   constructor(runId: string, cwd: string, startedAt: string = new Date().toISOString()) {
     this.runId = runId;
@@ -170,6 +192,7 @@ export class RunStore {
 
   /** Write a step record to the audit log and return it. */
   async recordStep(record: StepRecord): Promise<void> {
+    this.stepCountValue += 1;
     await this.audit({ type: 'step', ...record });
   }
 
@@ -179,7 +202,31 @@ export class RunStore {
     await writeFile(join(this.dir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
   }
 
-  /** Read the final result. */
+  /**
+   * Write the recorded IR of the run.
+   *
+   * The IR is what `bv compile` reads, so it is kept separate from the
+   * audit log: the audit log is append-only and machine-oriented, the IR
+   * is the human-facing record of what the agent did.
+   */
+  async writeRecorded(recorded: unknown): Promise<string> {
+    await mkdir(this.dir, { recursive: true });
+    const path = join(this.dir, 'recorded.json');
+    await writeFile(path, JSON.stringify(recorded, null, 2), 'utf8');
+    return path;
+  }
+
+  /** Read the run's recorded IR. */
+  async readRecorded(): Promise<unknown> {
+    try {
+      const raw = await readFile(join(this.dir, 'recorded.json'), 'utf8');
+      return JSON.parse(raw) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Read the run's result. */
   async readResult(): Promise<RunResult | undefined> {
     try {
       const raw = await readFile(join(this.dir, 'result.json'), 'utf8');
@@ -192,5 +239,10 @@ export class RunStore {
   /** The run's start time. */
   get started(): string {
     return this.startedAt;
+  }
+
+  /** How many steps have been recorded. */
+  get stepCount(): number {
+    return this.stepCountValue;
   }
 }

@@ -48,7 +48,7 @@ export function renderScript(flow: CompiledFlow): string {
   lines.push('// This script is plain Playwright: it needs no browser-verified code.');
   lines.push('// Review it, put it in version control, and run it in CI.');
   lines.push('');
-  lines.push("import { test, expect, type Page } from '@playwright/test';");
+  lines.push("import { test, expect, type Page, type Locator } from '@playwright/test';");
   lines.push('');
 
   if (flow.variables.length > 0) {
@@ -64,13 +64,12 @@ export function renderScript(flow: CompiledFlow): string {
 
   lines.push('/** Find an element, trying the recorded locators in order. */');
   lines.push('async function findElement(page: Page, selectors: string[]): Promise<Locator> {');
-  lines.push('  let lastError: unknown;');
   lines.push('  for (const selector of selectors) {');
   lines.push('    try {');
   lines.push('      const locator = resolve(page, selector);');
   lines.push('      if (await locator.count() > 0) return locator.first();');
-  lines.push('    } catch (error) {');
-  lines.push('      lastError = error;');
+  lines.push('    } catch {');
+  lines.push('      // This selector does not apply here; try the next one.');
   lines.push('    }');
   lines.push('  }');
   lines.push('  throw new Error(`no element matched any of: ${selectors.join(", ")}`);');

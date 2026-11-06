@@ -27,5 +27,5 @@
     "noEmit": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "fixtures/**/*.ts", "evals/**/*.ts", "*.ts"],
-  "exclude": ["node_modules", "dist", "scripts"]
+  "exclude": ["node_modules", "dist", "scripts", "flows"]
 }

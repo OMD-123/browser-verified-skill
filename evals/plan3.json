@@ -1,0 +1,7 @@
+{
+  "goal": "click sign in",
+  "successCondition": { "type": "text_visible", "text": "Signed in" },
+  "allowedOrigins": ["http://127.0.0.1:3000"],
+  "allowedActionClasses": ["read", "navigate", "submit"],
+  "maxSteps": 10
+}

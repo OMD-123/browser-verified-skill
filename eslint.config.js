@@ -41,6 +41,12 @@ export default tseslint.config(
     },
   },
   {
+    // The generated flow scripts and their Playwright config are plain
+    // Playwright, checked by their own tsconfig. They are not linted with
+    // the project's rules.
+    ignores: ['flows/**'],
+  },
+  {
     // Test and fixture files legitimately use loose patterns.
     files: ['test/**/*.ts', 'fixtures/**/*.ts', 'evals/**/*.ts'],
     rules: {
