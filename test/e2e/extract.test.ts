@@ -4,7 +4,12 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import type { Browser, Page } from 'playwright';
 import { launchChromium } from '../../src/core/browser.js';
-import { extract, renderExtraction, normalise, zodFromJsonSchema } from '../../src/verify/extract.js';
+import {
+  extract,
+  renderExtraction,
+  normalise,
+  zodFromJsonSchema,
+} from '../../src/verify/extract.js';
 
 describe('the JSON Schema to zod conversion', () => {
   it('builds a schema from an object', () => {

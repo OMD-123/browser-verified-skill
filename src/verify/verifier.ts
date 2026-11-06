@@ -159,15 +159,14 @@ async function evaluateCondition(
     results.push({
       condition,
       passed: inner === undefined ? false : !inner.passed,
-      reason: inner === undefined ? 'the inner condition was not evaluated' : `not (${inner.reason})`,
-      evidence:
-        inner?.evidence ??
-        {
-          kind: 'snapshot',
-          value: null,
-          url: context.page.url(),
-          capturedAt: new Date().toISOString(),
-        },
+      reason:
+        inner === undefined ? 'the inner condition was not evaluated' : `not (${inner.reason})`,
+      evidence: inner?.evidence ?? {
+        kind: 'snapshot',
+        value: null,
+        url: context.page.url(),
+        capturedAt: new Date().toISOString(),
+      },
     });
     return;
   }
@@ -246,7 +245,8 @@ async function evaluateLeaf(
 
     case 'network_response': {
       const matches = (context.network ?? []).filter(
-        (fact) => matchesPattern(fact.url, condition.urlPattern) && fact.status === condition.status,
+        (fact) =>
+          matchesPattern(fact.url, condition.urlPattern) && fact.status === condition.status,
       );
       return {
         condition,
@@ -328,10 +328,7 @@ interface TextLocation {
  * "Visible" means it is in the rendered text of a visible element, so text
  * hidden with `display: none` does not count.
  */
-async function findVisibleText(
-  page: Page,
-  text: string,
-): Promise<TextLocation | undefined> {
+async function findVisibleText(page: Page, text: string): Promise<TextLocation | undefined> {
   const locator = page.getByText(text, { exact: false }).first();
 
   // `count()` does not wait for the element, unlike `evaluate()`. Without

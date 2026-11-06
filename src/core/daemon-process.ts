@@ -5,6 +5,7 @@
  * HTTP daemon, wires the handlers to a `BrowserSession`, and writes the
  * descriptor to disk.
  */
+import { readFile } from 'node:fs/promises';
 import { startDaemon, type DaemonHandler, type DaemonRequest } from './daemon.js';
 import { writeDaemonInfo, clearDaemonInfo, type DaemonInfo } from './daemon-info.js';
 import { BrowserSession, buildUserAgent } from './session.js';
@@ -33,6 +34,7 @@ import { replay, renderReplay } from '../compile/replay.js';
 import { Recorder, candidatesFor, diffText, readPageText } from '../compile/recorder.js';
 import type { StepKind as RecorderStepKind } from '../compile/ir.js';
 import { readRun } from './runstore/store.js';
+import { findSnapshot, planRewind } from '../compile/snapshots.js';
 import type { Condition } from '../safety/planlock.js';
 
 /** Options for the daemon process. */
@@ -438,6 +440,66 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
     'approve.list': async () => ({
       data: { pending: approvals.listPending() },
     }),
+
+    // --- Rewind -----------------------------------------------------------
+    rewind: async (request: DaemonRequest) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const to = params['to'];
+      if (typeof to !== 'number' || !Number.isInteger(to) || to < 1) {
+        return { data: { error: '--to must be a step number' }, exitCode: EXIT.USAGE };
+      }
+
+      const sourceRun = typeof params['runId'] === 'string' ? params['runId'] : runId;
+      const snapshot = await findSnapshot(sourceRun, to, options.cwd);
+      const branchRunId =
+        typeof params['branchRunId'] === 'string' ? params['branchRunId'] : `${runId}-r${to}`;
+
+      const plan = planRewind(snapshot, to);
+
+      const page = await s.page();
+
+      // Restore the storage state, when there is one. The browser context is
+      // replaced, because Playwright's storage state is applied at context
+      // creation.
+      if (snapshot?.statePath !== undefined) {
+        try {
+          const raw = await readFile(snapshot.statePath, 'utf8');
+          const state = JSON.parse(raw) as { storageState?: unknown };
+          if (state.storageState !== undefined) {
+            await s.replaceStorageState(state.storageState);
+          }
+        } catch {
+          // A missing or unreadable state file is not fatal: the browser
+          // simply starts without it.
+        }
+      }
+
+      if (plan.url.length > 0) {
+        await page.goto(plan.url);
+      }
+
+      const branchStore = new RunStore(branchRunId, options.cwd);
+      await branchStore.init();
+      await branchStore.writeResult({
+        runId: branchRunId,
+        status: 'running',
+        steps: 0,
+        startedAt: new Date().toISOString(),
+        ...(plan.url.length > 0 ? { finalUrl: plan.url } : {}),
+      });
+
+      return {
+        data: {
+          branchRunId,
+          toStep: to,
+          url: plan.url,
+          storageRestored: plan.storageRestored,
+          notRestored: plan.notRestored,
+          sourceRun,
+        },
+      };
+    },
 
     // --- Verification ----------------------------------------------------
     verify: async (request: DaemonRequest) => {

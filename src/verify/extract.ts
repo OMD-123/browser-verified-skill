@@ -214,9 +214,7 @@ export async function extract(
         capturedAt,
         verified,
         ...(verified ? {} : { reason: 'the value could not be confirmed on a second read' }),
-        ...(options.screenshotPath !== undefined
-          ? { screenshotCrop: options.screenshotPath }
-          : {}),
+        ...(options.screenshotPath !== undefined ? { screenshotCrop: options.screenshotPath } : {}),
       },
     };
   }
@@ -274,8 +272,7 @@ async function findValue(
   const wanted = description ?? name;
 
   // A table cell or a definition list.
-  const cellSelector =
-    `dt:text-is("${wanted}") + dd, th:text-is("${wanted}") + td, td:text-is("${wanted}") + td`;
+  const cellSelector = `dt:text-is("${wanted}") + dd, th:text-is("${wanted}") + td, td:text-is("${wanted}") + td`;
   const paired = await page
     .locator(cellSelector)
     .first()
@@ -348,21 +345,14 @@ async function findValue(
  * one would compare the wrong thing: reading a label's text and comparing
  * it with the input's value would never match.
  */
-async function confirmValue(
-  page: Page,
-  found: FoundValue,
-  value: string,
-): Promise<boolean> {
+async function confirmValue(page: Page, found: FoundValue, value: string): Promise<boolean> {
   const again = await readWithStrategy(page, found);
   if (again === undefined) return false;
   return normalise(again) === normalise(value);
 }
 
 /** Read a value using the strategy it was found with. */
-async function readWithStrategy(
-  page: Page,
-  found: FoundValue,
-): Promise<string | undefined> {
+async function readWithStrategy(page: Page, found: FoundValue): Promise<string | undefined> {
   switch (found.strategy) {
     case 'paired-cell': {
       const text = await page
@@ -417,10 +407,7 @@ function escapeForRegex(value: string): string {
  * Every format has a source column, because a value without a source is
  * not an extraction — it is a guess.
  */
-export function renderExtraction(
-  result: ExtractionResult,
-  format: 'json' | 'csv' | 'md',
-): string {
+export function renderExtraction(result: ExtractionResult, format: 'json' | 'csv' | 'md'): string {
   switch (format) {
     case 'json':
       return JSON.stringify(result, null, 2);
@@ -443,7 +430,14 @@ export function renderExtraction(
     }
 
     case 'md': {
-      const lines = ['# Extracted values', '', `URL: ${result.url}`, '', '| Field | Value | Source | Verified |', '| --- | --- | --- | --- |'];
+      const lines = [
+        '# Extracted values',
+        '',
+        `URL: ${result.url}`,
+        '',
+        '| Field | Value | Source | Verified |',
+        '| --- | --- | --- | --- |',
+      ];
       for (const name of result.order) {
         const field = result.fields[name];
         if (field === undefined) continue;

@@ -10,7 +10,13 @@
  * comes first; the fallbacks are in comments, so a human can see what the
  * alternatives were and pick one deliberately.
  */
-import { applyVariables, findVariables, type CompiledFlow, type RecordedRun, type RecordedStep } from './ir.js';
+import {
+  applyVariables,
+  findVariables,
+  type CompiledFlow,
+  type RecordedRun,
+  type RecordedStep,
+} from './ir.js';
 
 /**
  * Compile a recorded run into a flow.
@@ -82,7 +88,9 @@ export function renderScript(flow: CompiledFlow): string {
   lines.push('    const match = /^role=(\\S+)(?: name="(.*)")?$/.exec(selector);');
   lines.push('    if (match === null) throw new Error(`bad selector: ${selector}`);');
   lines.push('    const [, role, name] = match;');
-  lines.push('    return page.getByRole(role as Parameters<Page["getByRole"]>[0], name !== undefined ? { name } : {});');
+  lines.push(
+    '    return page.getByRole(role as Parameters<Page["getByRole"]>[0], name !== undefined ? { name } : {});',
+  );
   lines.push('  }');
   lines.push("  if (selector.startsWith('label=')) {");
   lines.push('    return page.getByLabel(selector.slice(6).replace(/^"|"$/g, ""));');
@@ -102,7 +110,9 @@ export function renderScript(flow: CompiledFlow): string {
   if (flow.variables.length > 0) {
     lines.push('  const vars: FlowVars = {');
     for (const variable of flow.variables) {
-      lines.push(`    ${variable.name}: process.env.${variable.name.toUpperCase()} ?? ${JSON.stringify(variable.defaultValue)},`);
+      lines.push(
+        `    ${variable.name}: process.env.${variable.name.toUpperCase()} ?? ${JSON.stringify(variable.defaultValue)},`,
+      );
     }
     lines.push('  };');
     lines.push('');
@@ -141,7 +151,9 @@ function renderStep(step: RecordedStep, flow: CompiledFlow): string[] {
     case 'dblclick':
     case 'hover': {
       const method = step.kind === 'dblclick' ? 'dblclick' : step.kind;
-      lines.push(`  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
       lines.push(`  await target${step.index}.${method}();`);
       break;
     }
@@ -149,33 +161,49 @@ function renderStep(step: RecordedStep, flow: CompiledFlow): string[] {
     case 'fill':
     case 'type': {
       const value = renderValue(step.params.value, flow);
-      lines.push(`  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
       lines.push(`  await target${step.index}.fill(${value});`);
       break;
     }
 
     case 'select': {
-      lines.push(`  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`);
-      lines.push(`  await target${step.index}.selectOption(${JSON.stringify(step.params.option ?? '')});`);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(
+        `  await target${step.index}.selectOption(${JSON.stringify(step.params.option ?? '')});`,
+      );
       break;
     }
 
     case 'check':
     case 'uncheck': {
-      lines.push(`  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
       lines.push(`  await target${step.index}.${step.kind}();`);
       break;
     }
 
     case 'press': {
-      lines.push(`  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`);
-      lines.push(`  await target${step.index}.press(${JSON.stringify(step.params.key ?? 'Enter')});`);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(
+        `  await target${step.index}.press(${JSON.stringify(step.params.key ?? 'Enter')});`,
+      );
       break;
     }
 
     case 'upload': {
-      lines.push(`  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`);
-      lines.push(`  await target${step.index}.setInputFiles(${JSON.stringify(step.params.file ?? '')});`);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(
+        `  await target${step.index}.setInputFiles(${JSON.stringify(step.params.file ?? '')});`,
+      );
       break;
     }
 
@@ -185,7 +213,9 @@ function renderStep(step: RecordedStep, flow: CompiledFlow): string[] {
     }
 
     case 'wait': {
-      lines.push(`  await target${step.index}.waitFor({ state: '${step.params.condition ?? 'visible'}' });`);
+      lines.push(
+        `  await target${step.index}.waitFor({ state: '${step.params.condition ?? 'visible'}' });`,
+      );
       break;
     }
 
@@ -211,7 +241,9 @@ function renderAssertion(
     case 'url_changed':
       return [`  await expect(page).toHaveURL(${JSON.stringify(assertion.value ?? '')});`];
     case 'text_added':
-      return [`  await expect(page.getByText(${JSON.stringify(assertion.value ?? '')})).toBeVisible();`];
+      return [
+        `  await expect(page.getByText(${JSON.stringify(assertion.value ?? '')})).toBeVisible();`,
+      ];
     case 'count_changed':
       return [
         `  await expect(page.locator(${JSON.stringify(step.locators[0]?.value ?? '')})).toHaveCount(${assertion.count ?? 0});`,

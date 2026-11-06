@@ -7,16 +7,19 @@ is updated whenever a limitation is found or fixed.
 
 These are planned for later phases and do not exist in the current build:
 
-- **Verification and evidence (M12).** There is no `bv verify` command and no
-  success-condition DSL yet. A run is not "verified" — it is simply a run.
-- **Evidence-first extraction (M13).** `bv extract` does not exist.
-- **Time-travel (M14).** `bv rewind` does not exist. Step artifacts are
-  recorded, but they cannot be used to branch a run.
-- **Recorder, compiler, replay, heal and drift (M15).** `bv compile`,
-  `bv replay` and `bv drift` do not exist. Actions are not yet recorded as
-  a normalised IR, so a run cannot be turned into a Playwright script.
-- **Site memory (M16).** `bv memory` does not exist, and
-  `.bv/playbooks.sqlite` is not created.
+- **Verification and evidence (M12).** Built in this phase. `bv verify`
+  evaluates the success condition and exits 6 when it fails; a run that did
+  not verify is reported as `unverified`, never as done.
+- **Evidence-first extraction (M13).** Built in this phase. `bv extract`
+  pulls values from the page and confirms each one with a second read.
+- **Time-travel (M14).** Built in this phase: `bv rewind --to N` restores
+  the storage state, navigates to the step's URL and creates a branch run.
+  See the limitation below for what it cannot restore.
+- **Recorder, compiler, replay, heal and drift (M15).** Built in this
+  phase. `bv compile`, `bv replay` and `bv drift` all work, and a compiled
+  script is plain Playwright that runs in any Playwright project.
+- **Site memory (M16).** Built in this phase. `bv memory ls|rm|prune`
+  manage the SQLite playbook store.
 - **Interaction engine and profiles (M17).** `fill` is instant; there is no
   `--mode per_char`, no environment profiles, and no messy-user mode.
 - **Test mode (M18).** `bv test` does not exist. There is no axe-core scan,
@@ -66,12 +69,27 @@ policy ships with `localhost`, `127.0.0.1` and `*.example.com`.
 operator owns. The exemption is checked against the origin, not the path,
 so an owned origin is trusted entirely.
 
-## Time-travel cannot restore in-page or server-side state
+## Time-travel restores the browser's place, not the moment
 
-Not built yet, but the limitation is known and will be documented in full
-when it is: restoring a step's storage state and navigating to its URL does
-not restore JavaScript state, open sockets, service workers, or anything the
-server computed. The `KNOWN_LIMITATIONS` entry will say so plainly.
+`bv rewind --to N` restores the storage state, navigates to the step's URL
+and creates a branch run to carry on from there. It gets the browser back to
+the same **place**.
+
+It does **not** get the browser back to the same **moment**. Specifically,
+these are not restored:
+
+- **In-page JavaScript state** — variables, closures, and the DOM that the
+  page's script built. A page that fetched data and rendered it will be
+  empty again.
+- **Server-side state** — the database, the session, anything the server
+  computed. A page that was showing a signed-in account will show the
+  signed-out page, because the cookie was restored but the server session
+  it refers to may have moved on.
+- **Open network connections and service workers.**
+- **The browser history and the back/forward stack.**
+
+Every rewind returns this list, so the caller is told what they are not
+getting rather than finding out when the flow diverges.
 
 ## Secret redaction is best-effort against unusual encodings
 

@@ -70,7 +70,10 @@ export class DriftLog {
   /** Render the drift as a report. */
   render(): string {
     if (this.entries.length === 0) return 'No drift: every step still uses its original locator.';
-    const lines = [`${this.entries.length} drift entr${this.entries.length === 1 ? 'y' : 'ies'}:`, ''];
+    const lines = [
+      `${this.entries.length} drift entr${this.entries.length === 1 ? 'y' : 'ies'}:`,
+      '',
+    ];
     for (const entry of this.entries) {
       lines.push(`  Step ${entry.stepIndex}: ${entry.from} → ${entry.to} (${entry.unchanged})`);
       lines.push(`      ${entry.reason}`);

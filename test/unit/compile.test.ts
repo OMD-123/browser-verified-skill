@@ -338,7 +338,7 @@ describe('the compiler', () => {
 
   it('emits the inferred url assertion', () => {
     const script = renderScript(compileFlow(run()));
-    expect(script).toContain("await expect(page).toHaveURL(\"http://x/done\")");
+    expect(script).toContain('await expect(page).toHaveURL("http://x/done")');
   });
 
   it('lists the fallback locators in a comment', () => {
@@ -438,9 +438,9 @@ describe('the drift description', () => {
   });
 
   it('handles a missing original', () => {
-    expect(
-      describeUnchanged(undefined, { strategy: 'css', value: '#a', css: '#a' }),
-    ).toBe('no original locator');
+    expect(describeUnchanged(undefined, { strategy: 'css', value: '#a', css: '#a' })).toBe(
+      'no original locator',
+    );
   });
 });
 
@@ -506,7 +506,12 @@ describe('the healer', () => {
       kind: 'click' as const,
       locators: [
         { strategy: 'css' as const, value: '#gone', css: '#gone' },
-        { strategy: 'role' as const, value: 'role=button name="Sign in"', role: 'button', name: 'Sign in' },
+        {
+          strategy: 'role' as const,
+          value: 'role=button name="Sign in"',
+          role: 'button',
+          name: 'Sign in',
+        },
       ],
       params: {},
       pre: { url: 'http://x/' },
@@ -529,7 +534,12 @@ describe('the healer', () => {
       kind: 'click' as const,
       locators: [
         { strategy: 'css' as const, value: '#gone', css: '#gone' },
-        { strategy: 'role' as const, value: 'role=button name="Sign in"', role: 'button', name: 'Sign in' },
+        {
+          strategy: 'role' as const,
+          value: 'role=button name="Sign in"',
+          role: 'button',
+          name: 'Sign in',
+        },
       ],
       params: {},
       pre: { url: 'http://x/' },
@@ -547,7 +557,14 @@ describe('the healer', () => {
     const step = {
       index: 1,
       kind: 'click' as const,
-      locators: [{ strategy: 'role' as const, value: 'role=button name="Sign in"', role: 'button', name: 'Sign in' }],
+      locators: [
+        {
+          strategy: 'role' as const,
+          value: 'role=button name="Sign in"',
+          role: 'button',
+          name: 'Sign in',
+        },
+      ],
       params: {},
       pre: { url: 'http://x/' },
       post: { url: 'http://x/' },
@@ -621,7 +638,17 @@ describe('the replay report', () => {
   it('reports a successful replay', () => {
     const text = renderReplay({
       ok: true,
-      steps: [{ index: 1, ok: true, strategy: 'role', attempted: ['a'], durationMs: 1, urlAfter: 'http://x/', healed: false }],
+      steps: [
+        {
+          index: 1,
+          ok: true,
+          strategy: 'role',
+          attempted: ['a'],
+          durationMs: 1,
+          urlAfter: 'http://x/',
+          healed: false,
+        },
+      ],
       drift: new DriftLog(),
       healedCount: 0,
       durationMs: 10,

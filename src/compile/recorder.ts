@@ -218,7 +218,10 @@ export async function readPageText(page: Page, limit = 2_000): Promise<string> {
  *
  * The result is what the assertions are inferred from.
  */
-export function diffText(before: string, after: string): {
+export function diffText(
+  before: string,
+  after: string,
+): {
   added: string[];
   removed: string[];
 } {

@@ -77,13 +77,14 @@ export function registerProof(program: Command): void {
           ...(options.run !== undefined ? { runId: options.run } : {}),
         });
 
-        const lines = [payload.summary, ...payload.results.map((r) => `  ${r.passed ? 'pass' : 'FAIL'}  ${r.reason}`)];
+        const lines = [
+          payload.summary,
+          ...payload.results.map((r) => `  ${r.passed ? 'pass' : 'FAIL'}  ${r.reason}`),
+        ];
         // A run that did not verify is a failure, not a success.
         emit(
           cmd,
-          payload.passed
-            ? ok(payload, lines)
-            : fail(payload, lines, EXIT.VERIFICATION_FAILED),
+          payload.passed ? ok(payload, lines) : fail(payload, lines, EXIT.VERIFICATION_FAILED),
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -99,51 +100,99 @@ export function registerProof(program: Command): void {
     .option('--schema <file>', 'the JSON Schema file')
     .option('--out <file>', 'write the result to this file')
     .option('--format <format>', 'json, csv or md', 'json')
-    .action(
-      async (options: { schema?: string; out?: string; format?: string }, cmd: Command) => {
-        const global = globalOptions(cmd);
-        if (options.schema === undefined) {
-          const message = 'bv extract needs --schema <file>';
-          emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
-          return;
-        }
+    .action(async (options: { schema?: string; out?: string; format?: string }, cmd: Command) => {
+      const global = globalOptions(cmd);
+      if (options.schema === undefined) {
+        const message = 'bv extract needs --schema <file>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
 
-        const format = options.format ?? 'json';
-        if (!['json', 'csv', 'md'].includes(format)) {
-          const message = `--format must be json, csv or md, not "${format}"`;
-          emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
-          return;
-        }
+      const format = options.format ?? 'json';
+      if (!['json', 'csv', 'md'].includes(format)) {
+        const message = `--format must be json, csv or md, not "${format}"`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
 
+      try {
+        const raw = await readFile(absPath(options.schema, global.cwd), 'utf8');
+        let schema: unknown;
         try {
-          const raw = await readFile(absPath(options.schema, global.cwd), 'utf8');
-          let schema: unknown;
-          try {
-            schema = JSON.parse(raw);
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new UsageError(`the schema file is not valid JSON: ${message}`);
-          }
-
-          const client = await connectDaemon(global.cwd);
-          const payload = await client.call<ExtractPayload>('extract', { schema });
-
-          const text = renderExtract(payload, format);
-          if (options.out !== undefined) {
-            const path = absPath(options.out, global.cwd);
-            await mkdir(dirname(path), { recursive: true });
-            await writeFile(path, text, 'utf8');
-            emit(cmd, ok(payload, [`written to ${options.out}`]));
-            return;
-          }
-          emit(cmd, ok(payload, [text]));
+          schema = JSON.parse(raw);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
-          emit(cmd, fail({ error: message }, [message], code));
+          throw new UsageError(`the schema file is not valid JSON: ${message}`);
         }
-      },
-    );
+
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call<ExtractPayload>('extract', { schema });
+
+        const text = renderExtract(payload, format);
+        if (options.out !== undefined) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, text, 'utf8');
+          emit(cmd, ok(payload, [`written to ${options.out}`]));
+          return;
+        }
+        emit(cmd, ok(payload, [text]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+
+  // --- bv rewind ---------------------------------------------------------
+  program
+    .command('rewind')
+    .description('rewind the browser to an earlier step and continue in a branch run')
+    .option('--to <n>', 'the step to rewind to')
+    .option('--run <runId>', 'the run the step belongs to')
+    .action(async (options: { to?: string; run?: string }, cmd: Command) => {
+      const global = globalOptions(cmd);
+      if (options.to === undefined) {
+        const message = 'bv rewind needs --to <n>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+
+      const to = Number(options.to);
+      if (!Number.isInteger(to) || to < 1) {
+        const message = `--to must be a step number, not "${options.to}"`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+
+      try {
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call<{
+          branchRunId: string;
+          toStep: number;
+          url: string;
+          storageRestored: boolean;
+          notRestored: string[];
+        }>('rewind', {
+          to,
+          ...(options.run !== undefined ? { runId: options.run } : {}),
+        });
+
+        const lines = [
+          `rewound to step ${payload.toStep} in branch run ${payload.branchRunId}`,
+          `url: ${payload.url}`,
+          `storage state restored: ${payload.storageRestored ? 'yes' : 'no'}`,
+          '',
+          "A rewind restores the browser's place, not the moment. Not restored:",
+          ...payload.notRestored.map((item) => `  - ${item}`),
+        ];
+        emit(cmd, ok(payload, lines));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
 
   // --- bv compile --------------------------------------------------------
   program
@@ -184,38 +233,33 @@ export function registerProof(program: Command): void {
     .argument('<runId>', 'the run to replay')
     .option('--var <k=v>', 'a variable value (repeatable)', collect)
     .option('--heal', 'repair a step whose locator broke', false)
-    .action(
-      async (runId: string, options: { var?: string[]; heal?: boolean }, cmd: Command) => {
-        const global = globalOptions(cmd);
-        try {
-          await readRun(runId, global.cwd);
-          const client = await connectDaemon(global.cwd);
-          const payload = await client.call<{
-            ok: boolean;
-            summary: string;
-            healedCount: number;
-            drift: { stepIndex: number; from: string; to: string; unchanged: string }[];
-          }>('replay', {
-            runId,
-            variables: parseVariables(options.var ?? []),
-            heal: options.heal === true,
-          });
+    .action(async (runId: string, options: { var?: string[]; heal?: boolean }, cmd: Command) => {
+      const global = globalOptions(cmd);
+      try {
+        await readRun(runId, global.cwd);
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call<{
+          ok: boolean;
+          summary: string;
+          healedCount: number;
+          drift: { stepIndex: number; from: string; to: string; unchanged: string }[];
+        }>('replay', {
+          runId,
+          variables: parseVariables(options.var ?? []),
+          heal: options.heal === true,
+        });
 
-          const lines = [payload.summary];
-          for (const entry of payload.drift) {
-            lines.push(`  Step ${entry.stepIndex}: ${entry.from} → ${entry.to} (${entry.unchanged})`);
-          }
-          emit(
-            cmd,
-            payload.ok ? ok(payload, lines) : fail(payload, lines, EXIT.VERIFICATION_FAILED),
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
-          emit(cmd, fail({ error: message }, [message], code));
+        const lines = [payload.summary];
+        for (const entry of payload.drift) {
+          lines.push(`  Step ${entry.stepIndex}: ${entry.from} → ${entry.to} (${entry.unchanged})`);
         }
-      },
-    );
+        emit(cmd, payload.ok ? ok(payload, lines) : fail(payload, lines, EXIT.VERIFICATION_FAILED));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
 
   // --- bv drift ----------------------------------------------------------
   program
@@ -325,10 +369,7 @@ function renderExtract(payload: ExtractPayload, format: string): string {
     return lines.join('\n');
   }
 
-  const lines = [
-    '| Field | Value | Source | Verified |',
-    '| --- | --- | --- | --- |',
-  ];
+  const lines = ['| Field | Value | Source | Verified |', '| --- | --- | --- | --- |'];
   for (const name of payload.order) {
     const field = payload.fields[name];
     if (field === undefined) continue;
@@ -367,11 +408,20 @@ function csvEscape(value: string): string {
 async function readDrift(
   runId: string,
   cwd: string,
-): Promise<{ stepIndex: number; from: string; to: string; unchanged: string; at: string; reason: string }[]> {
+): Promise<
+  { stepIndex: number; from: string; to: string; unchanged: string; at: string; reason: string }[]
+> {
   const run = await readRun(runId, cwd);
   const recorded = (run as RecordedRun & { drift?: unknown }).drift;
   if (Array.isArray(recorded)) {
-    return recorded as { stepIndex: number; from: string; to: string; unchanged: string; at: string; reason: string }[];
+    return recorded as {
+      stepIndex: number;
+      from: string;
+      to: string;
+      unchanged: string;
+      at: string;
+      reason: string;
+    }[];
   }
   return [];
 }

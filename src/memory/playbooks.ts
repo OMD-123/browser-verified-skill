@@ -115,14 +115,7 @@ export class Playbooks {
          confidence = excluded.confidence,
          last_verified_at = excluded.last_verified_at,
          expires_at = excluded.expires_at`,
-    ).run(
-      origin,
-      key,
-      value,
-      confidence,
-      now.toISOString(),
-      expiresAt.toISOString(),
-    );
+    ).run(origin, key, value, confidence, now.toISOString(), expiresAt.toISOString());
 
     return {
       origin,
@@ -200,7 +193,9 @@ export class Playbooks {
   /** Forget one entry. */
   forget(origin: string, key: string): boolean {
     const db = this.open();
-    const result = db.prepare('DELETE FROM playbooks WHERE origin = ? AND key = ?').run(origin, key);
+    const result = db
+      .prepare('DELETE FROM playbooks WHERE origin = ? AND key = ?')
+      .run(origin, key);
     return result.changes > 0;
   }
 

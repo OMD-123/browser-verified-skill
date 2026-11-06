@@ -4,7 +4,7 @@
  * Everything that touches Playwright's browser model lives here, so the rest
  * of the codebase deals with plain data.
  */
-import type { Browser, BrowserContext, Page, Frame } from 'playwright';
+import type { Browser, BrowserContext, BrowserContextOptions, Page, Frame } from 'playwright';
 
 /** A tab in a session. */
 export interface TabInfo {
@@ -63,6 +63,36 @@ export class SessionState {
     if (this.context !== undefined) return this.context;
     const contextOptions: Parameters<Browser['newContext']>[0] = {};
     if (options.userAgent !== undefined) contextOptions.userAgent = options.userAgent;
+    this.context = await this.browser.newContext(contextOptions);
+    return this.context;
+  }
+
+  /**
+   * Replace the context with one that has the given storage state.
+   *
+   * Playwright applies a storage state when a context is created, so
+   * restoring one means creating a new context. The pages of the old
+   * context are closed and a fresh one is opened in the new context.
+   */
+  async replaceContext(options: {
+    storageState?: BrowserContextOptions['storageState'];
+    userAgent?: string;
+  }): Promise<BrowserContext> {
+    const oldPages = [...this.pages];
+    this.pages = [];
+    this.activeIndex = 0;
+
+    if (this.context !== undefined) {
+      await this.context.close().catch(() => undefined);
+      this.context = undefined;
+    }
+    for (const page of oldPages) {
+      await page.close().catch(() => undefined);
+    }
+
+    const contextOptions: Parameters<Browser['newContext']>[0] = {};
+    if (options.userAgent !== undefined) contextOptions.userAgent = options.userAgent;
+    if (options.storageState !== undefined) contextOptions.storageState = options.storageState;
     this.context = await this.browser.newContext(contextOptions);
     return this.context;
   }

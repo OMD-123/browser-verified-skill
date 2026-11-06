@@ -262,10 +262,7 @@ export function textAssertion(post: StepPost): InferredAssertion | undefined {
  * Only a count that is stable is asserted. A count that is zero before and
  * after is not a change.
  */
-export function countAssertion(
-  pre: StepPre,
-  post: StepPost,
-): InferredAssertion | undefined {
+export function countAssertion(pre: StepPre, post: StepPost): InferredAssertion | undefined {
   if (pre.matchCount === undefined || post.matchCount === undefined) return undefined;
   if (pre.matchCount === post.matchCount) return undefined;
   return {

@@ -5,7 +5,11 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import type { Browser, Page } from 'playwright';
 import { launchChromium } from '../../src/core/browser.js';
 import { verify, matchesPattern } from '../../src/verify/verifier.js';
-import { summarizeVerification, describeCondition, evidenceIsComplete } from '../../src/verify/evidence.js';
+import {
+  summarizeVerification,
+  describeCondition,
+  evidenceIsComplete,
+} from '../../src/verify/evidence.js';
 
 describe('the pattern matcher', () => {
   it('matches a substring', () => {
@@ -152,7 +156,10 @@ describe('the verifier', () => {
   });
 
   it('reports an llm-judged condition as unverified in Mode A', async () => {
-    const result = await verify({ type: 'llm_judged', claim: 'the page shows a receipt' }, { page });
+    const result = await verify(
+      { type: 'llm_judged', claim: 'the page shows a receipt' },
+      { page },
+    );
     expect(result.passed).toBe(false);
     expect(result.results[0]?.reason).toContain('unverified');
   });
@@ -210,15 +217,15 @@ describe('the verifier', () => {
   });
 
   it('verifies a not composition', async () => {
-    const result = await verify(
-      { not: { type: 'text_visible', text: 'Nonexistent' } },
-      { page },
-    );
+    const result = await verify({ not: { type: 'text_visible', text: 'Nonexistent' } }, { page });
     expect(result.passed).toBe(true);
   });
 
   it('fails a not composition when the inner condition passes', async () => {
-    const result = await verify({ not: { type: 'text_visible', text: 'Order complete' } }, { page });
+    const result = await verify(
+      { not: { type: 'text_visible', text: 'Order complete' } },
+      { page },
+    );
     expect(result.passed).toBe(false);
   });
 
@@ -301,9 +308,9 @@ describe('the condition description', () => {
     expect(describeCondition({ type: 'url_matches', pattern: '/x' })).toContain('url matches');
     expect(describeCondition({ type: 'text_visible', text: 'a' })).toContain('text visible');
     expect(describeCondition({ type: 'element', role: 'button' })).toContain('role=button');
-    expect(describeCondition({ type: 'network_response', urlPattern: '/x', status: 200 })).toContain(
-      'network',
-    );
+    expect(
+      describeCondition({ type: 'network_response', urlPattern: '/x', status: 200 }),
+    ).toContain('network');
     expect(describeCondition({ type: 'storage', key: 'a', matches: 'b' })).toContain('storage');
     expect(describeCondition({ type: 'llm_judged', claim: 'c' })).toContain('llm judged');
   });

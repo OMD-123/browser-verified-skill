@@ -20,10 +20,7 @@ import type { RecordedRun, RecordedStep } from '../../src/compile/ir.js';
 const FIXTURE = process.env['BV_FIXTURE_ORIGIN'] ?? 'http://127.0.0.1:3000';
 
 /** A click step. */
-function clickStep(
-  index: number,
-  locators: ReturnType<typeof candidatesFor>,
-): RecordedStep {
+function clickStep(index: number, locators: ReturnType<typeof candidatesFor>): RecordedStep {
   return {
     index,
     kind: 'click',

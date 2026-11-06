@@ -8,7 +8,7 @@
  * It is deliberately separate from the HTTP layer so it can be driven
  * in-process by tests.
  */
-import type { Browser, ConsoleMessage, Page } from 'playwright';
+import type { Browser, BrowserContextOptions, ConsoleMessage, Page } from 'playwright';
 import { launchChromium } from './browser.js';
 import { SessionState, type TabInfo } from './contexts.js';
 import type { RunStore, StepRecord } from './runstore/store.js';
@@ -90,15 +90,28 @@ export class BrowserSession {
   }
 
   /**
- * The network responses seen in this session.
- *
- * The verifier uses these for the `network_response` condition.
- */
-networkFacts: NetworkFact[] = [];
+   * The network responses seen in this session.
+   *
+   * The verifier uses these for the `network_response` condition.
+   */
+  networkFacts: NetworkFact[] = [];
 
   /** The current URL, when the browser is running. */
   get currentUrl(): string | undefined {
     return this.state?.currentUrl();
+  }
+
+  /**
+   * Replace the browser context's storage state.
+   *
+   * Playwright applies a storage state when a context is created, so the
+   * context is replaced. The active page is re-opened in the new context.
+   */
+  async replaceStorageState(storageState: unknown): Promise<void> {
+    await this.sessionState.replaceContext({
+      storageState: storageState as BrowserContextOptions['storageState'],
+      userAgent: this.userAgent,
+    });
   }
 
   /**

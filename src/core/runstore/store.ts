@@ -88,15 +88,14 @@ export interface RunResult {
  * which is the case for a run that was made before the recorder existed or
  * that ended before any step succeeded.
  */
-export async function readRun(
-  runId: string,
-  cwd: string = process.cwd(),
-): Promise<RecordedRun> {
+export async function readRun(runId: string, cwd: string = process.cwd()): Promise<RecordedRun> {
   const store = new RunStore(runId, cwd);
   const recorded = (await store.readRecorded()) as RecordedRun | undefined;
 
   if (recorded === undefined) {
-    throw new Error(`the run ${runId} has no recording. Only runs made with the recorder can be compiled.`);
+    throw new Error(
+      `the run ${runId} has no recording. Only runs made with the recorder can be compiled.`,
+    );
   }
   return recorded;
 }

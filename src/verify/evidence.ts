@@ -119,7 +119,9 @@ export function summarizeVerification(result: VerificationResult): string {
   }
 
   for (const item of result.results) {
-    lines.push(`  ${item.passed ? 'pass' : 'FAIL'}  ${describeCondition(item.condition)}  — ${item.reason}`);
+    lines.push(
+      `  ${item.passed ? 'pass' : 'FAIL'}  ${describeCondition(item.condition)}  — ${item.reason}`,
+    );
   }
 
   return lines.join('\n');
