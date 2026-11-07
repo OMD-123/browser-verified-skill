@@ -166,7 +166,50 @@ reaches the network.
 - The **user agent is honest**: `BrowserVerified/<version> (+<contact-url>)`,
   applied at the context level.
 
-### 2.9 Forbidden capabilities are rejected at configuration time
+### 2.9 The agent loop (Mode B)
+
+`src/agent/loop.ts` is where a model decides what to do next. The important
+property is where the gate sits:
+
+> **The safety gate is inside the loop, not above it.**
+
+Every action the model proposes goes through the same `evaluateAction` that
+the CLI uses (`src/safety/gate.ts`). There is no "agent mode" that relaxes
+the checks, and no path through the loop that skips them. A model that
+proposes to click something it should not is refused exactly as a human's
+would be, with the same exit code and the same rule id.
+
+The loop also stops on its own, with specific reasons:
+
+| Stop reason                  | Meaning                                 |
+| ---------------------------- | --------------------------------------- |
+| `the model finished`         | the model said it was done              |
+| `the step budget ran out`    | it used its steps                       |
+| `the model asked a question` | it needs a human                        |
+| `the model repeated itself`  | it proposed the same action three times |
+| `the model made no progress` | it kept failing or being refused        |
+| `an error stopped the loop`  | including the budget running out        |
+
+A refusal is fed back to the model with the approval id when there is one,
+so the model can ask for the approval rather than guessing.
+
+### 2.10 Skills are data, and untrusted skills are marked
+
+`src/memory/skills.ts` reads skills as markdown with a frontmatter block.
+They are **data, not code**: a skill can be reviewed, diffed and corrected by
+the person who knows the site, without a rebuild.
+
+Two rules:
+
+- **A skill never bypasses the policy.** A skill can say where a button is;
+  it cannot say that an action does not need approval. The gate does not
+  read skills, so there is nothing for a skill to influence.
+- **A skill is untrusted text.** It is written by someone, and that someone
+  might be a page. A skill whose frontmatter says `untrusted: true` is
+  rendered with a marker _before_ its body, so the agent knows what it is
+  reading before it reads it.
+
+### 2.11 Forbidden capabilities are rejected at configuration time
 
 The policy schema is validated with zod `.strict()`, so a policy that tries to
 enable fingerprint spoofing, stealth plugins, proxy rotation, CAPTCHA solving or
@@ -190,10 +233,17 @@ Stated plainly, because a security model that overclaims is worse than none.
 
 - **The injection guard is heuristic.** It detects the patterns it knows. A novel
   phrasing, an indirect injection through image alt text that avoids the
-  instruction lexicon, or an attack split across several nodes can pass. The
-  Phase 6 red-team pack measures this and the misses are published rather than
-  hidden. Treat the guard as a **speed bump and an evidence source**, not as a
-  trust boundary.
+  instruction lexicon, or an attack split across several nodes can pass.
+  Treat the guard as a **speed bump and an evidence source**, not as a trust
+  boundary.
+
+  The red-team suite (`test/redteam/guards.test.ts`) builds twelve payloads
+  that each attack the guard differently, and asserts that every one is
+  caught. It is a regression test, not a proof: a payload that is not in the
+  suite has not been tried. When the suite found six payloads that got
+  through, they were fixed and written up in `KNOWN_LIMITATIONS.md` — that
+  is the pattern to expect, not an exception.
+
 - **A compromised host agent can still act.** If the model running `bv` is
   convinced to approve a malicious action, the approval gate will faithfully
   record that a human approved it. The gate prevents _accidental_ and

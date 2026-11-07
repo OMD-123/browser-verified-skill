@@ -262,9 +262,7 @@ export async function runAgentLoop(
         outcome: 'refused',
         reason: verdict.reasons.join('; '),
         ruleIds: verdict.ruleIds,
-        ...(verdict.approval !== undefined
-          ? { approvalId: verdict.approval.actionId }
-          : {}),
+        ...(verdict.approval !== undefined ? { approvalId: verdict.approval.actionId } : {}),
         durationMs: Date.now() - startedAt,
       };
       steps.push(step);
@@ -359,10 +357,7 @@ export async function runAgentLoop(
  * This is the same input the CLI's `act` handler builds, so the gate sees
  * the same thing either way.
  */
-export function gateInputFor(
-  action: AgentAction,
-  environment: AgentEnvironment,
-): GateInput {
+export function gateInputFor(action: AgentAction, environment: AgentEnvironment): GateInput {
   const base: GateInput = {
     intent: intentFor(action),
     currentUrl: environment.currentUrl(),
@@ -454,7 +449,7 @@ export function parseAction(text: string): AgentAction | undefined {
 
   // A JSON object, possibly wrapped in a code fence.
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(trimmed);
-  const candidate = fenced !== null ? fenced[1]?.trim() ?? trimmed : trimmed;
+  const candidate = fenced !== null ? (fenced[1]?.trim() ?? trimmed) : trimmed;
 
   let parsed: unknown;
   try {
@@ -513,9 +508,7 @@ export function parseAction(text: string): AgentAction | undefined {
     }
     case 'ask': {
       const question = record['question'];
-      return typeof question === 'string'
-        ? { kind: 'ask', question }
-        : undefined;
+      return typeof question === 'string' ? { kind: 'ask', question } : undefined;
     }
     default:
       return undefined;

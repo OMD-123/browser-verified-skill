@@ -76,11 +76,13 @@ type PlanClass =
   | 'download';
 
 /** A permissive gate. */
-function gate(overrides: {
-  origins?: string[];
-  classes?: PlanClass[];
-  approvalRequired?: PlanClass[];
-} = {}) {
+function gate(
+  overrides: {
+    origins?: string[];
+    classes?: PlanClass[];
+    approvalRequired?: PlanClass[];
+  } = {},
+) {
   const planLock = new PlanLock();
   planLock.set(
     createPlan({
