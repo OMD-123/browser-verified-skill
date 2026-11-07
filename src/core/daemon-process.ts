@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/require-await -- some handlers are
+ * genuinely synchronous but must return a Promise to match the handler
+ * type. */
+
 /**
  * The daemon's browser-facing entry point.
  *
@@ -241,41 +245,42 @@ const ACTION_KINDS: readonly ActionKind[] = [
 ];
 
 /** Start the daemon process and serve until it is stopped. */
-export async function runDaemonProcess(options: DaemonProcessOptions): Promise<void> {
-  await ensureBvDir(options.cwd);
+/** The context the handler factory needs. */
+export interface DaemonContext {
+  /** The run id. */
+  runId: string;
+  /** The run store. */
+  store: RunStore;
+  /** The working directory. */
+  cwd: string;
+  /** Whether the browser is headed. */
+  headed?: boolean;
+  /** The policy. */
+  policy: Policy;
+  /** The plan lock. */
+  planLock: PlanLock;
+  /** The approval store. */
+  approvals: ApprovalStore;
+  /** The injection scanner. */
+  scanner: InjectionScanner;
+  /** The recorder. */
+  recorder: Recorder;
+  /** Get the browser session, launching it if needed. */
+  getSession: () => Promise<BrowserSession>;
+}
 
-  const runId = options.runId ?? newRunId();
-  const store = new RunStore(runId, options.cwd);
-  await store.init();
+/**
+ * Build the daemon's handlers.
+ *
+ * This is separate from the HTTP server so the handlers can be exercised
+ * directly, in-process. The daemon's behaviour is then testable without a
+ * listening socket, and the coverage report shows what is really exercised.
+ */
+export function createHandlers(context: DaemonContext): Record<string, DaemonHandler> {
+  const { store, policy, planLock, approvals, scanner, recorder, getSession } = context;
+  const runId = context.runId;
+  const options = { cwd: context.cwd, headed: context.headed === true };
 
-  const userAgent = buildUserAgent(options.contactUrl);
-  let session: BrowserSession | undefined;
-
-  // The safety layer. The policy is loaded once at start-up; the plan-lock
-  // and the approval store live for the life of the daemon, so an approval
-  // issued in one CLI call is usable in the next.
-  const policy: Policy = await loadPolicy(options.cwd);
-  const planLock = new PlanLock();
-  const approvals = new ApprovalStore();
-  const scanner = new InjectionScanner();
-  // The recorder writes the IR that `bv compile` reads.
-  const recorder = new Recorder(runId);
-
-  const getSession = async (): Promise<BrowserSession> => {
-    if (session === undefined) {
-      session = new BrowserSession({
-        store,
-        userAgent,
-        headed: options.headed,
-      });
-      await session.launch();
-    }
-    return session;
-  };
-
-  /* eslint-disable @typescript-eslint/require-await -- some handlers are
-   * genuinely synchronous but must return a Promise to match the handler
-   * type. */
   const handlers: Record<string, DaemonHandler> = {
     snapshot: async (request: DaemonRequest) => {
       const s = await getSession();
@@ -845,6 +850,59 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
     },
   };
 
+  return handlers;
+}
+
+/**
+ * Run the daemon.
+ *
+ * This wires the handlers to an HTTP server and keeps the process alive
+ * until the server closes.
+ */
+export async function runDaemonProcess(options: DaemonProcessOptions): Promise<void> {
+  await ensureBvDir(options.cwd);
+
+  const runId = options.runId ?? newRunId();
+  const store = new RunStore(runId, options.cwd);
+  await store.init();
+
+  const userAgent = buildUserAgent(options.contactUrl);
+  let session: BrowserSession | undefined;
+
+  // The safety layer. The policy is loaded once at start-up; the plan-lock
+  // and the approval store live for the life of the daemon, so an approval
+  // issued in one CLI call is usable in the next.
+  const policy: Policy = await loadPolicy(options.cwd);
+  const planLock = new PlanLock();
+  const approvals = new ApprovalStore();
+  const scanner = new InjectionScanner();
+  // The recorder writes the IR that `bv compile` reads.
+  const recorder = new Recorder(runId);
+
+  const getSession = async (): Promise<BrowserSession> => {
+    if (session === undefined) {
+      session = new BrowserSession({
+        store,
+        userAgent,
+        headed: options.headed,
+      });
+      await session.launch();
+    }
+    return session;
+  };
+
+  const handlers = createHandlers({
+    runId,
+    store,
+    cwd: options.cwd,
+    ...(options.headed !== undefined ? { headed: options.headed } : {}),
+    policy,
+    planLock,
+    approvals,
+    scanner,
+    recorder,
+    getSession,
+  });
   const daemon = await startDaemon({
     handlers,
     session: options.session,
