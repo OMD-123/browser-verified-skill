@@ -114,7 +114,9 @@ export function renderReports(reports: readonly BugReport[]): string {
   lines.push(`${reports.length} problem(s).`);
   lines.push('');
 
-  const bySeverity = [...reports].sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  const bySeverity = [...reports].sort(
+    (a, b) => severityRank(a.severity) - severityRank(b.severity),
+  );
 
   for (const report of bySeverity) {
     lines.push(`## ${report.summary}`);
@@ -149,10 +151,7 @@ export function renderReportsJson(reports: readonly BugReport[]): string {
 /**
  * Render the findings themselves, alongside the reports.
  */
-export function renderFullReport(
-  findings: PageFindings,
-  reports: readonly BugReport[],
-): string {
+export function renderFullReport(findings: PageFindings, reports: readonly BugReport[]): string {
   return `${renderFindings(findings)}\n\n---\n\n${renderReports(reports)}`;
 }
 
@@ -210,9 +209,7 @@ export function worthReporting(findings: PageFindings): boolean {
 /**
  * The page's title, for the report.
  */
-export async function readTitle(page: {
-  title(): Promise<string>;
-}): Promise<string> {
+export async function readTitle(page: { title(): Promise<string> }): Promise<string> {
   try {
     return await page.title();
   } catch {

@@ -65,7 +65,8 @@ describe('the differential runner', () => {
   });
 
   it('says two identical pages are identical', async () => {
-    const html = '<html lang="en"><head><title>Same</title></head><body><h1>Same</h1><button>Go</button></body></html>';
+    const html =
+      '<html lang="en"><head><title>Same</title></head><body><h1>Same</h1><button>Go</button></body></html>';
     const url = `data:text/html,${encodeURIComponent(html)}`;
 
     const result = await diffPages(browser, url, url);
@@ -83,8 +84,10 @@ describe('the differential runner', () => {
   });
 
   it('renders the difference', async () => {
-    const htmlA = '<html lang="en"><head><title>A</title></head><body><button>Only A</button></body></html>';
-    const htmlB = '<html lang="en"><head><title>B</title></head><body><button>Only B</button></body></html>';
+    const htmlA =
+      '<html lang="en"><head><title>A</title></head><body><button>Only A</button></body></html>';
+    const htmlB =
+      '<html lang="en"><head><title>B</title></head><body><button>Only B</button></body></html>';
 
     const result = await diffPages(
       browser,
@@ -121,7 +124,12 @@ describe('the bug reporter', () => {
       url: 'http://x/page',
       console: [{ type: 'error', text: 'the console broke', at: 'now' }],
       networkFailures: [
-        { url: 'http://x/missing', method: 'GET', error: 'net::ERR_FAILED', resourceType: 'script' },
+        {
+          url: 'http://x/missing',
+          method: 'GET',
+          error: 'net::ERR_FAILED',
+          resourceType: 'script',
+        },
       ],
       pageErrors: ['the page threw'],
     };

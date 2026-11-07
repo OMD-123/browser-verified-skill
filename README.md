@@ -211,18 +211,18 @@ Every command supports `--help`, `--json` and a meaningful exit code.
 
 ```text
 bv doctor [--install]               bv test [--plan f|--auto]
-bv init                              bv diff --a URL --b URL [--flow f]
+bv init                              bv diff --a URL --b URL [--out f]
 bv session start|stop|status         bv research --questions q.json --sources urls.txt
-bv plan set|show|amend              bv discover-api <runId>
+bv plan set|show|amend              bv discover-api <runId> [--openapi]
 bv snapshot [--full] [--max-tokens N] bv vault set|list|rm
 bv act <kind> <target> [value]       bv memory ls|rm|prune
 bv approve <actionId>                bv redteam run [--target guard|agent]
 bv verify --condition cond.json      bv eval run [--tasks ...] [--arm bv|baseline]
-bv extract --schema schema.json      bv report <runId> [--format html|md]
+bv extract --schema schema.json      bv report <runId> [--format md|json]
 bv rewind --to N                     bv resume
 bv compile <runId> --out f.spec.ts   bv mcp
-bv replay <flow> [--var k=v] [--heal]
-bv drift <flow>
+bv replay <runId> [--var k=v] [--heal]
+bv drift <runId>                     bv audit [runId]
 ```
 
 ---

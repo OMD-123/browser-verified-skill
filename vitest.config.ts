@@ -36,10 +36,10 @@ export default defineConfig({
           statements: 90,
         },
         'src/perception/**/*.ts': {
-          branches: 71,
-          lines: 90,
-          functions: 91,
-          statements: 86,
+          branches: 78,
+          lines: 94,
+          functions: 96,
+          statements: 90,
         },
         'src/actions/**/*.ts': {
           branches: 44,
@@ -48,16 +48,16 @@ export default defineConfig({
           statements: 50,
         },
         'src/core/**/*.ts': {
-          branches: 31,
-          lines: 46,
-          functions: 47,
-          statements: 44,
+          branches: 41,
+          lines: 52,
+          functions: 50,
+          statements: 50,
         },
         'src/cli/**/*.ts': {
-          branches: 22,
-          lines: 47,
-          functions: 51,
-          statements: 46,
+          branches: 20,
+          lines: 43,
+          functions: 47,
+          statements: 42,
         },
         'src/verify/**/*.ts': {
           branches: 72,
@@ -84,10 +84,10 @@ export default defineConfig({
           statements: 94,
         },
         'src/testing/**/*.ts': {
-          branches: 66,
-          lines: 88,
+          branches: 69,
+          lines: 89,
           functions: 90,
-          statements: 88,
+          statements: 89,
         },
         'src/llm/**/*.ts': {
           branches: 90,

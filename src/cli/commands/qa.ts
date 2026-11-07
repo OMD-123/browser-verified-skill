@@ -20,6 +20,13 @@ import {
 } from '../../testing/report.js';
 import { FindingsCollector, renderFindings } from '../../testing/qa.js';
 import type { PageFindings } from '../../testing/qa.js';
+import {
+  asOpenApiFragment,
+  discoverEndpoints,
+  renderEndpoints,
+  type ObservedRequest,
+} from '../../testing/discover.js';
+import { renderResearch, research, type ResearchQuestion } from '../../testing/research.js';
 
 /** Register the QA commands. */
 export function registerQa(program: Command): void {
@@ -68,42 +75,85 @@ export function registerQa(program: Command): void {
       }
     });
 
-  // --- bv report ----------------------------------------------------------
+  // --- bv discover-api ----------------------------------------------------
   program
-    .command('report')
-    .description('report what a run found, as Markdown or JSON')
-    .argument('<runId>', 'the run to report on')
-    .option('--format <format>', 'md or json', 'md')
-    .option('--out <file>', 'write the report to this file')
+    .command('discover-api')
+    .description('report the API endpoints a run actually used')
+    .argument('<runId>', 'the run to inspect')
+    .option('--out <file>', 'write the result to this file')
+    .option('--openapi', 'write an OpenAPI fragment instead', false)
+    .action(async (runId: string, options: { out?: string; openapi?: boolean }, cmd: Command) => {
+      const global = globalOptions(cmd);
+      try {
+        const facts = await readNetworkFacts(runId, global.cwd);
+        const endpoints = discoverEndpoints(facts);
+        const text =
+          options.openapi === true
+            ? JSON.stringify(asOpenApiFragment(endpoints), null, 2)
+            : renderEndpoints(endpoints);
+
+        if (options.out !== undefined) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, text, 'utf8');
+        }
+
+        emit(cmd, ok({ runId, endpoints, count: endpoints.length }, [text]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+
+  // --- bv research ---------------------------------------------------------
+  program
+    .command('research')
+    .description('answer questions from a set of sources, in the browser')
+    .option('--questions <file>', 'the questions JSON file')
+    .option('--sources <file>', 'the sources file, one URL per line')
+    .option('--out <file>', 'write the result to this file')
     .action(
-      async (runId: string, options: { format?: string; out?: string }, cmd: Command) => {
+      async (options: { questions?: string; sources?: string; out?: string }, cmd: Command) => {
         const global = globalOptions(cmd);
-        const format = options.format ?? 'md';
-        if (!['md', 'json'].includes(format)) {
-          const message = `--format must be md or json, not "${format}"`;
+        if (options.questions === undefined || options.sources === undefined) {
+          const message = 'bv research needs --questions <file> and --sources <file>';
           emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
           return;
         }
 
         try {
-          const findings = await readFindings(runId, global.cwd);
-          const reports = buildReports(findings, {
-            reproSteps: ['open the url', 'observe the page'],
-          });
-          const text =
-            format === 'json'
-              ? renderReportsJson(reports)
-              : renderFullReport(findings, reports);
+          const questionsRaw = await readFile(absPath(options.questions, global.cwd), 'utf8');
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(questionsRaw);
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            throw new UsageError(`the questions file is not valid JSON: ${detail}`);
+          }
 
+          const questions = normaliseQuestions(parsed);
+          const sources = (await readFile(absPath(options.sources, global.cwd), 'utf8'))
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0 && !line.startsWith('#'));
+
+          const browser = await launchChromium();
+          let result: Awaited<ReturnType<typeof research>>;
+          try {
+            result = await research(browser, questions, sources);
+          } finally {
+            await browser.close();
+          }
+
+          const text = renderResearch(result);
           if (options.out !== undefined) {
             const path = absPath(options.out, global.cwd);
             await mkdir(dirname(path), { recursive: true });
             await writeFile(path, text, 'utf8');
           }
 
-          const lines =
-            format === 'json' ? [`${reports.length} problem(s) found.`] : [renderReports(reports)];
-          emit(cmd, ok({ runId, findings, reports }, lines));
+          emit(cmd, ok(result, [text]));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
@@ -111,6 +161,46 @@ export function registerQa(program: Command): void {
         }
       },
     );
+
+  // --- bv report ----------------------------------------------------------
+  program
+    .command('report')
+    .description('report what a run found, as Markdown or JSON')
+    .argument('<runId>', 'the run to report on')
+    .option('--format <format>', 'md or json', 'md')
+    .option('--out <file>', 'write the report to this file')
+    .action(async (runId: string, options: { format?: string; out?: string }, cmd: Command) => {
+      const global = globalOptions(cmd);
+      const format = options.format ?? 'md';
+      if (!['md', 'json'].includes(format)) {
+        const message = `--format must be md or json, not "${format}"`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+
+      try {
+        const findings = await readFindings(runId, global.cwd);
+        const reports = buildReports(findings, {
+          reproSteps: ['open the url', 'observe the page'],
+        });
+        const text =
+          format === 'json' ? renderReportsJson(reports) : renderFullReport(findings, reports);
+
+        if (options.out !== undefined) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, text, 'utf8');
+        }
+
+        const lines =
+          format === 'json' ? [`${reports.length} problem(s) found.`] : [renderReports(reports)];
+        emit(cmd, ok({ runId, findings, reports }, lines));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
 
   // --- bv audit -----------------------------------------------------------
   program
@@ -129,13 +219,69 @@ export function registerQa(program: Command): void {
 
         const entries = await readAudit(id, global.cwd);
         const lines = entries.map((entry) => JSON.stringify(entry));
-        emit(cmd, ok({ runId: id, entries }, lines.length > 0 ? lines : ['(the audit log is empty)']));
+        emit(
+          cmd,
+          ok({ runId: id, entries }, lines.length > 0 ? lines : ['(the audit log is empty)']),
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
         emit(cmd, fail({ error: message }, [message], code));
       }
     });
+}
+
+/**
+ * Read the network facts of a run.
+ */
+async function readNetworkFacts(runId: string, cwd: string): Promise<ObservedRequest[]> {
+  const path = `${runDir(runId, cwd)}/network.json`;
+  try {
+    const raw = await readFile(path, 'utf8');
+    return JSON.parse(raw) as ObservedRequest[];
+  } catch {
+    throw new UsageError(
+      `the run ${runId} has no network log. Only a run made with the network watcher has one.`,
+    );
+  }
+}
+
+/**
+ * Normalise the questions file.
+ *
+ * Both shapes are accepted: a list of strings, and a list of objects with
+ * a `question` field.
+ */
+function normaliseQuestions(parsed: unknown): ResearchQuestion[] {
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' &&
+        parsed !== null &&
+        Array.isArray((parsed as { questions?: unknown }).questions)
+      ? (parsed as { questions: unknown[] }).questions
+      : undefined;
+
+  if (list === undefined) {
+    throw new UsageError('the questions file must be a list, or an object with a "questions" list');
+  }
+
+  return list.map((entry) => {
+    if (typeof entry === 'string') return { question: entry };
+    if (typeof entry === 'object' && entry !== null) {
+      const question = (entry as { question?: unknown }).question;
+      const id = (entry as { id?: unknown }).id;
+      if (typeof question !== 'string') {
+        throw new UsageError(
+          'every question must be a string or an object with a "question" field',
+        );
+      }
+      return {
+        question,
+        ...(typeof id === 'string' ? { id } : {}),
+      };
+    }
+    throw new UsageError('every question must be a string or an object with a "question" field');
+  });
 }
 
 /**
@@ -159,10 +305,7 @@ async function readFindings(runId: string, cwd: string): Promise<PageFindings> {
 /**
  * Read the audit log of a run.
  */
-async function readAudit(
-  runId: string,
-  cwd: string,
-): Promise<Record<string, unknown>[]> {
+async function readAudit(runId: string, cwd: string): Promise<Record<string, unknown>[]> {
   const path = `${runDir(runId, cwd)}/audit.jsonl`;
   try {
     const raw = await readFile(path, 'utf8');

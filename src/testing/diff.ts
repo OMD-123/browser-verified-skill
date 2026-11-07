@@ -67,11 +67,7 @@ function nodeKey(node: DiffNode): string {
 /**
  * Open two pages and compare their accessibility trees.
  */
-export async function diffPages(
-  browser: Browser,
-  urlA: string,
-  urlB: string,
-): Promise<DiffResult> {
+export async function diffPages(browser: Browser, urlA: string, urlB: string): Promise<DiffResult> {
   const context = await browser.newContext();
   const pageA = await context.newPage();
   const pageB = await context.newPage();
@@ -130,10 +126,7 @@ export async function diffPages(
       onlyInB,
       changed,
       nodeCounts: { a: treeA.length, b: treeB.length },
-      identical:
-        onlyInA.length === 0 &&
-        onlyInB.length === 0 &&
-        changed.length === 0,
+      identical: onlyInA.length === 0 && onlyInB.length === 0 && changed.length === 0,
     };
   } finally {
     await context.close();
