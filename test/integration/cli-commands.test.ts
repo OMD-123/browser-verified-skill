@@ -5,7 +5,7 @@
  * command's own logic, which is what the coverage report was missing.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
@@ -397,6 +397,117 @@ describe('the CLI command modules', () => {
       `${fixture}/pages/index.html`,
     ]);
     expect(result.stdout).toContain('Only in');
+  });
+
+  // --- bv test ------------------------------------------------------------
+
+  it('needs a suite file', async () => {
+    const result = await run(dir, ['test']);
+    expect(result.stdout).toContain('--suite');
+  });
+
+  it('rejects a suite file that is not JSON', async () => {
+    await writeFile(join(dir, 'suite.json'), 'not json', 'utf8');
+    const result = await run(dir, ['test', '--suite', 'suite.json']);
+    expect(result.stdout).toContain('not valid JSON');
+  });
+
+  it('rejects a suite with no name', async () => {
+    await writeFile(join(dir, 'suite.json'), JSON.stringify({ checks: [] }), 'utf8');
+    const result = await run(dir, ['test', '--suite', 'suite.json']);
+    expect(result.stdout).toContain('needs a "name"');
+  });
+
+  it('runs a suite', async () => {
+    const fixture = process.env['BV_FIXTURE_ORIGIN'] ?? 'http://127.0.0.1:3000';
+    const suite = {
+      name: 'a suite',
+      checks: [
+        {
+          name: 'the index loads',
+          url: `${fixture}/pages/index.html`,
+          expect: { type: 'url_matches', pattern: '/pages/index' },
+        },
+      ],
+    };
+    await writeFile(join(dir, 'suite.json'), JSON.stringify(suite), 'utf8');
+
+    const result = await run(dir, ['test', '--suite', 'suite.json']);
+    expect(result.stdout).toContain('1/1 passed');
+  });
+
+  it('reports a failing check', async () => {
+    const fixture = process.env['BV_FIXTURE_ORIGIN'] ?? 'http://127.0.0.1:3000';
+    const suite = {
+      name: 'a suite',
+      checks: [
+        {
+          name: 'a check that cannot pass',
+          url: `${fixture}/pages/index.html`,
+          expect: { type: 'text_visible', text: 'not on the page' },
+        },
+      ],
+    };
+    await writeFile(join(dir, 'suite.json'), JSON.stringify(suite), 'utf8');
+
+    const result = await run(dir, ['test', '--suite', 'suite.json']);
+    expect(result.stdout).toContain('a check that cannot pass');
+  });
+
+  it('writes the result to a file', async () => {
+    const fixture = process.env['BV_FIXTURE_ORIGIN'] ?? 'http://127.0.0.1:3000';
+    const suite = {
+      name: 'a suite',
+      checks: [
+        {
+          name: 'the index loads',
+          url: `${fixture}/pages/index.html`,
+          expect: { type: 'url_matches', pattern: '/pages/index' },
+        },
+      ],
+    };
+    await writeFile(join(dir, 'suite.json'), JSON.stringify(suite), 'utf8');
+
+    await run(dir, ['test', '--suite', 'suite.json', '--out', 'out/result.txt']);
+    const written = await readFile(join(dir, 'out', 'result.txt'), 'utf8');
+    expect(written).toContain('1/1 passed');
+  });
+
+  it('filters by tag', async () => {
+    const fixture = process.env['BV_FIXTURE_ORIGIN'] ?? 'http://127.0.0.1:3000';
+    const suite = {
+      name: 'a suite',
+      checks: [
+        {
+          name: 'a smoke check',
+          url: `${fixture}/pages/index.html`,
+          expect: { type: 'url_matches', pattern: '/pages/index' },
+          tags: ['smoke'],
+        },
+        {
+          name: 'a slow check',
+          url: `${fixture}/pages/login.html`,
+          expect: { type: 'url_matches', pattern: '/pages/login' },
+          tags: ['slow'],
+        },
+      ],
+    };
+    await writeFile(join(dir, 'suite.json'), JSON.stringify(suite), 'utf8');
+
+    const result = await run(dir, ['test', '--suite', 'suite.json', '--tag', 'smoke']);
+    expect(result.stdout).toContain('1/1 passed');
+  });
+
+  // --- bv redteam ---------------------------------------------------------
+
+  it('rejects an unknown redteam action', async () => {
+    const result = await run(dir, ['redteam', 'attack']);
+    expect(result.stdout).toContain('unknown redteam action');
+  });
+
+  it('runs the red-team catalogue', async () => {
+    const result = await run(dir, ['redteam', 'run']);
+    expect(result.stdout).toContain('attack(s) were caught');
   });
 
   // --- bv report ----------------------------------------------------------

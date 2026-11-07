@@ -117,14 +117,44 @@ Typing modes, mouse behaviour, environment profiles built on Playwright
 
 ### `src/testing/` — QA
 
-Console capture, a11y (axe-core), viewport matrix, perf metrics, visual
-regression (pixelmatch), bug reports, the flaky classifier, site health scoring,
-bounded crawling, and the differential runner.
+The test-suite runner, console capture, a11y (axe-core), the viewport matrix,
+perf metrics, visual comparison (hash-based), bug reports, the flaky
+classifier, site health scoring, the differential runner, API discovery, the
+research module, and the red-team runner.
+
+### `src/agent/` — Mode B only
+
+The agent loop and the cost report.
+
+The loop's defining property: **the safety gate is inside the loop, not above
+it**. Every action the model proposes goes through the same `evaluateAction`
+the CLI uses. A model that decides to click something it should not is refused
+exactly as a human's would be.
+
+The loop stops on its own, with specific reasons: the model finished, the step
+budget ran out, it asked a question, it repeated itself, it made no progress,
+or an error stopped it.
 
 ### `src/llm/` — Mode B only
 
-`LlmClient` interface, the Anthropic implementation (lazy-loaded), the tier
-router, the budget guard, and cost reporting. Mode A never touches these.
+`LlmClient` interface, the tier router, the budget guard, and cost reporting.
+Mode A never touches these.
+
+### `src/mcp/` — the Model Context Protocol
+
+The MCP server and its wiring. Every tool call becomes a daemon request, so
+the MCP path and the CLI path go through **one** policy engine. There is no
+route through MCP that skips a check.
+
+### `src/memory/` — playbooks and skills
+
+The site memory (playbooks, in SQLite) and the skills. A skill is **data**,
+not code: markdown with a frontmatter block, read at runtime, so it can be
+reviewed and corrected by the person who knows the site without a rebuild.
+
+A skill never bypasses the policy — the gate does not read skills, so there
+is nothing for a skill to influence. And a skill is untrusted text: one that
+came from a page is rendered with a marker before its body.
 
 ---
 

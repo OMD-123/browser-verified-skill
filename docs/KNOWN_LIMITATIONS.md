@@ -5,32 +5,33 @@ is updated whenever a limitation is found or fixed.
 
 ## Not built yet
 
-These are planned for later phases and do not exist in the current build:
+Everything in the module map below is built. These are the things that are
+still missing, and they are listed because a reader should know what is not
+there:
 
-- **Verification and evidence (M12).** Built in this phase. `bv verify`
-  evaluates the success condition and exits 6 when it fails; a run that did
-  not verify is reported as `unverified`, never as done.
-- **Evidence-first extraction (M13).** Built in this phase. `bv extract`
-  pulls values from the page and confirms each one with a second read.
-- **Time-travel (M14).** Built in this phase: `bv rewind --to N` restores
-  the storage state, navigates to the step's URL and creates a branch run.
-  See the limitation below for what it cannot restore.
-- **Recorder, compiler, replay, heal and drift (M15).** Built in this
-  phase. `bv compile`, `bv replay` and `bv drift` all work, and a compiled
-  script is plain Playwright that runs in any Playwright project.
-- **Site memory (M16).** Built in this phase. `bv memory ls|rm|prune`
-  manage the SQLite playbook store.
-- **Interaction engine and profiles (M17).** `fill` is instant; there is no
-  `--mode per_char`, no environment profiles, and no messy-user mode.
-- **Test mode (M18).** `bv test` does not exist. There is no axe-core scan,
-  no viewport matrix, no visual regression and no bug report.
-- **Differential runner (M19).** `bv diff` does not exist.
-- **Research mode (M20).** `bv research` does not exist.
-- **API discovery (M21).** `bv discover-api` does not exist.
-- **Mode B, the autonomous loop (M22).** `bv run --goal` does not exist.
-  Every command in the current build is Mode A: the host agent drives, and
-  `bv` needs no LLM and no API key.
-- **MCP wrapper (Phase 7).** `bv mcp` does not exist.
+- **`bv run --goal` — the fully autonomous Mode B entry point.** The agent
+  loop exists (`src/agent/loop.ts`) and the safety gate is inside it, but the
+  loop is not yet wired to a command. Today the loop is a library that the
+  MCP server and the CLI can call, not a `bv run` you can point at a goal.
+- **`bv eval` — the A/B benchmark harness.** The comparison between `bv` and a
+  baseline needs a task corpus and a scoring harness. Neither exists.
+- **`bv resume` — resuming an interrupted run.** `bv rewind --to N` creates a
+  branch from an earlier step, which covers most of what a resume would do;
+  what it does not cover is picking up exactly where a crashed run stopped.
+- **A live model provider.** `src/llm/client.ts` defines the `LlmClient`
+  interface, the tier router and the budget guard, but there is **no
+  implementation of `LlmClient` that talks to a provider**. The interface is
+  what Mode B needs; filling it in means writing the adapter and exercising it
+  against the live API, which the project's own rule — no test needs a network
+  or a key — has so far kept out of the build.
+
+  The Anthropic SDK _is_ a dependency, for one thing: `bv` can ask it for an
+  exact token count instead of estimating one. That path is the only one that
+  reaches a provider, and it is lazy-loaded and optional.
+
+- **Multi-browser.** Chromium only. The Playwright abstraction would allow
+  Firefox and WebKit, but they are not tested and the interactions that
+  depend on Chromium's behaviour are not verified elsewhere.
 
 ## The injection guard is heuristic and will miss novel attacks
 
@@ -129,12 +130,21 @@ post-processing is what makes the "grep the run directory and find
 nothing" test meaningful, but it is a post-processing step and not a
 guarantee from the recorder.
 
-## The approval gate needs a headed browser to be usable interactively
+## An approval needs a human, but the human need not be at the keyboard
 
-A `needs_approval` refusal can be resolved with a token in a headless
-session, but the token has to be issued by something that can prompt a
-human. The intended flow is `bv session start --headed`, then
-`bv approve <id>`.
+A `needs_approval` refusal is resolved with a one-time token, and the token
+is issued by `bv approve <id>`. That command can run in another terminal, on
+another machine over SSH, or in a CI job with a human watching the log.
+
+What changed: a headless session used to **deny** an approval-required action
+outright, on the grounds that it could not prompt anyone. That was wrong. It
+made the approval mechanism unusable in exactly the situation it exists for.
+A headless session now returns `needs_approval` like any other, and the
+operator resolves it out of band.
+
+What is still true: the approval is only as good as the person watching. The
+gate records that a human approved the action; it cannot tell whether that
+human read it.
 
 ## The daemon trusts its own descriptor file
 

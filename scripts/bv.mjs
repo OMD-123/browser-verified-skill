@@ -9200,7 +9200,7 @@ function registerQa(program) {
     });
 }
 function collect2(value, previous) {
-  return [...previous, value];
+  return [...(previous ?? []), value];
 }
 async function readNetworkFacts(runId, cwd) {
   const path = `${runDir(runId, cwd)}/network.json`;

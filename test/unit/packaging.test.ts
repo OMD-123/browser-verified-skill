@@ -110,6 +110,7 @@ describe('the published artifact', () => {
   it('does not depend on a package it does not use', async () => {
     const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
       devDependencies: Record<string, string>;
     };
 
@@ -117,7 +118,12 @@ describe('the published artifact', () => {
     // The check is deliberately loose about the exact import style; the
     // point is that a dependency nobody imports is dead weight in every
     // install.
-    for (const name of Object.keys(manifest.dependencies)) {
+    const all = {
+      ...manifest.dependencies,
+      ...(manifest.optionalDependencies ?? {}),
+    };
+
+    for (const name of Object.keys(all)) {
       // Every dependency is either imported somewhere in src/ or is a
       // peer of one that is.
       const imported = await importer.grep(join(ROOT, 'src'), name);

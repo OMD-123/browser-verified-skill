@@ -318,9 +318,12 @@ export function registerQa(program: Command): void {
 
 /**
  * Collect a repeatable option into an array.
+ *
+ * Commander passes `undefined` for `previous` on the first call, so the
+ * default has to handle it.
  */
-function collect(value: string, previous: string[]): string[] {
-  return [...previous, value];
+function collect(value: string, previous: string[] | undefined): string[] {
+  return [...(previous ?? []), value];
 }
 
 /**

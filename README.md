@@ -64,6 +64,39 @@ Mode A needs **no API key**: `bv` is a thin client that returns compact, diffed,
 injection-scanned output, and records every command so the run can be compiled
 afterwards.
 
+### Approvals in a headless session
+
+An action that needs a human's say-so is refused with **exit 4** and an
+approval id. In a headless session it cannot ask, so you approve it out of
+band — in another terminal, or in CI, wherever a human is watching:
+
+```bash
+bv act click 'role=button name="Submit"'
+# refused: the "submit" action class requires approval...
+# approval id: 7f3a91c2...
+
+bv approve 7f3a91c2                 # prints a one-time token
+bv act click 'role=button name="Submit"' --approve <token>
+```
+
+The token is bound to that exact action and works once.
+
+### Check it works
+
+```bash
+npm run acceptance
+```
+
+This drives the installed CLI through a real browser against a real fixture
+server and checks 17 claims this README makes — the session starts, the
+snapshot has refs, an action without a plan is refused with exit 3, an action
+needing approval is refused with exit 4 and an approval id, the approved
+action runs, the compiled script imports nothing from `bv`, the MCP server
+answers, and the red-team catalogue is fully caught.
+
+It is separate from the test suite on purpose: _"the tests pass"_ and _"the
+thing works"_ are different statements.
+
 ---
 
 ## When to use it
@@ -233,26 +266,29 @@ bv drift <runId>
 browser-verified/
 ├── SKILL.md                 # the Agent Skill (<500 lines)
 ├── references/              # progressive disclosure docs
+├── skills/                  # example skills (the format, and one real one)
 ├── scripts/bv.mjs           # single-file bundled CLI
+├── scripts/acceptance.mjs   # the end-to-end claim checker
 ├── policies/default.yaml    # the shipped default policy
 ├── src/                     # TypeScript source
 │   ├── cli/                 # commander wiring only
-│   ├── core/                # daemon, client, contexts
+│   ├── core/                # daemon, client, contexts, paths, exit codes
 │   ├── perception/          # snapshot, diff, prune, refs, tokens
 │   ├── actions/             # locate, act, waits, download, frames
 │   ├── safety/              # policy, approvals, planlock, taint, injection, vault
 │   ├── verify/              # conditions, verifier, evidence, extract
 │   ├── compile/             # recorder, compiler, replay, heal, drift
-│   ├── interaction/         # typing, mouse, profiles, messy, throttle
-│   ├── testing/             # runner, console, a11y, perf, visual, flake, diff
-│   ├── research/            # workers, crosscheck, sources, apidiscovery
-│   ├── llm/                 # client, anthropic, router, budget, cost
-│   ├── memory/              # playbooks
-│   └── report/              # html, md
+│   ├── interaction/         # typing, mouse, profiles, throttle
+│   ├── testing/             # suite, console, a11y, perf, visual, flake, diff, redteam
+│   ├── agent/               # the agent loop and the cost report
+│   ├── llm/                 # client, router, budget
+│   ├── mcp/                 # the MCP server and its wiring
+│   ├── memory/              # playbooks and skills
+│   └── types/               # shared types
 ├── fixtures/                # local test site (no network)
-├── evals/                   # T01–T20 tasks, red-team pack, harness
-├── test/                    # unit, integration, e2e
-└── docs/                    # DECISIONS, KNOWN_LIMITATIONS, BENCHMARKS, …
+├── evals/                   # coverage probes and harnesses
+├── test/                    # unit, integration, e2e, redteam
+└── docs/                    # ARCHITECTURE, DECISIONS, SECURITY, KNOWN_LIMITATIONS
 ```
 
 ---
