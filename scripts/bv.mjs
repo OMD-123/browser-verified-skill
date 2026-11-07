@@ -39,6 +39,48 @@ var init_exit = __esm({
   },
 });
 
+// src/core/errors.ts
+function toBvError(err) {
+  if (err instanceof BvError) return err;
+  if (err instanceof Error) {
+    return new BvError(err.message, { cause: err });
+  }
+  return new BvError(String(err));
+}
+var BvError, UsageError, SessionError;
+var init_errors = __esm({
+  'src/core/errors.ts'() {
+    'use strict';
+    init_exit();
+    BvError = class extends Error {
+      exitCode;
+      /** Machine-readable reason codes, e.g. `policy.deny`, `plan.off_plan`. */
+      reasons;
+      /** Extra structured detail for `--json` output. */
+      detail;
+      constructor(message, options = {}) {
+        super(message, options.cause === void 0 ? void 0 : { cause: options.cause });
+        this.name = 'BvError';
+        this.exitCode = options.exitCode ?? EXIT.FAILURE;
+        this.reasons = options.reasons ?? [];
+        this.detail = options.detail ?? {};
+      }
+    };
+    UsageError = class extends BvError {
+      constructor(message, detail = {}) {
+        super(message, { exitCode: EXIT.USAGE, detail });
+        this.name = 'UsageError';
+      }
+    };
+    SessionError = class extends BvError {
+      constructor(message, detail = {}) {
+        super(message, { exitCode: EXIT.FAILURE, detail });
+        this.name = 'SessionError';
+      }
+    };
+  },
+});
+
 // src/version.ts
 import { createRequire } from 'module';
 import { existsSync, readFileSync } from 'fs';
@@ -90,6 +132,9 @@ function policyPath(cwd = process.cwd()) {
 }
 function vaultPath(cwd = process.cwd()) {
   return join2(bvRoot(cwd), 'vault.enc');
+}
+function playbooksPath(cwd = process.cwd()) {
+  return join2(bvRoot(cwd), 'playbooks.sqlite');
 }
 function daemonInfoPath(cwd = process.cwd()) {
   return join2(bvRoot(cwd), 'daemon.json');
@@ -193,6 +238,85 @@ var init_daemon_info = __esm({
   'src/core/daemon-info.ts'() {
     'use strict';
     init_paths();
+  },
+});
+
+// src/core/client.ts
+async function connectDaemon(cwd) {
+  const info = await readDaemonInfo(cwd);
+  if (info === void 0) {
+    throw new SessionError('no running session found. Start one with `bv session start`.');
+  }
+  if (!isProcessAlive(info.pid)) {
+    throw new SessionError(
+      `the session process (pid ${info.pid}) is no longer running. Start a new one with \`bv session start\`.`,
+    );
+  }
+  const token = await readDaemonToken(cwd);
+  if (token === void 0) {
+    throw new SessionError(
+      'the session token is missing. Stop the stale session with `bv session stop` and start a new one.',
+    );
+  }
+  const baseUrl = daemonBaseUrl(info);
+  return createClient(baseUrl, token, info.port);
+}
+function createClient(baseUrl, token, port) {
+  const call = async (method, params = {}, options = {}) => {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await fetch(`${baseUrl}/rpc`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ method, params }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new SessionError(`could not reach the session daemon: ${message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      throw new SessionError(
+        `the session daemon returned a non-JSON response (${response.status})`,
+      );
+    }
+    if (!body.ok) {
+      const err = new Error(body.error ?? 'the session daemon reported an unknown error');
+      Object.assign(err, { reasons: body.reasons ?? [], exitCode: body.exitCode });
+      throw err;
+    }
+    return body.data;
+  };
+  const health = async () => {
+    try {
+      const response = await fetch(`${baseUrl}/health`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+  return { port, call, health };
+}
+var DEFAULT_TIMEOUT_MS;
+var init_client = __esm({
+  'src/core/client.ts'() {
+    'use strict';
+    init_daemon_info();
+    init_errors();
+    DEFAULT_TIMEOUT_MS = 12e4;
   },
 });
 
@@ -1088,6 +1212,1002 @@ var init_planlock = __esm({
   },
 });
 
+// src/compile/ir.ts
+function findVariables(run2, minimumUses = 2) {
+  const uses = /* @__PURE__ */ new Map();
+  for (const step of run2.steps) {
+    const value = step.params.value;
+    if (value === void 0 || value.length === 0) continue;
+    const existing = uses.get(value);
+    if (existing === void 0) {
+      uses.set(value, { count: 1, firstStep: step.index });
+    } else {
+      existing.count += 1;
+    }
+  }
+  const variables = [];
+  let counter = 0;
+  for (const [value, info] of uses) {
+    if (info.count < minimumUses) continue;
+    counter += 1;
+    variables.push({
+      name: `var${counter}`,
+      defaultValue: value,
+      stepIndex: info.firstStep,
+    });
+  }
+  return variables;
+}
+function applyVariables(steps, variables) {
+  return steps.map((step) => {
+    const value = step.params.value;
+    if (value === void 0) return step;
+    const match = variables.find((variable) => variable.defaultValue === value);
+    if (match === void 0) return step;
+    return {
+      ...step,
+      params: { ...step.params, value: `{{${match.name}}}` },
+    };
+  });
+}
+function urlAssertion(pre, post) {
+  if (pre.url === post.url) return void 0;
+  if (isVolatile(post.url)) return void 0;
+  return {
+    kind: 'url_changed',
+    description: `the url changes to ${post.url}`,
+    value: post.url,
+  };
+}
+function textAssertion(post) {
+  const added = post.addedText ?? [];
+  const stable = added.filter((text) => !isVolatile(text));
+  const first = stable[0];
+  if (first === void 0) return void 0;
+  return {
+    kind: 'text_added',
+    description: `the text "${first}" appears`,
+    value: first,
+  };
+}
+function countAssertion(pre, post) {
+  if (pre.matchCount === void 0 || post.matchCount === void 0) return void 0;
+  if (pre.matchCount === post.matchCount) return void 0;
+  return {
+    kind: 'count_changed',
+    description: `the number of matching elements changes from ${pre.matchCount} to ${post.matchCount}`,
+    count: post.matchCount,
+  };
+}
+function isVolatile(value) {
+  if (value.length === 0) return false;
+  if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(value)) return true;
+  if (/[0-9a-f]{16,}/i.test(value)) return true;
+  if (/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(value)) return true;
+  if (/\b1[6-9]\d{8}\b/.test(value)) return true;
+  if (/\b(timestamp|generated at|request id|order id|session id|nonce)\b/i.test(value)) {
+    return true;
+  }
+  if (/\b\d{1,2}:\d{2}(:\d{2})?\b/.test(value)) return true;
+  return false;
+}
+var init_ir = __esm({
+  'src/compile/ir.ts'() {
+    'use strict';
+  },
+});
+
+// src/compile/heal.ts
+async function healStep(page, step, driftLog) {
+  const attempted = [];
+  for (const candidate of step.locators) {
+    attempted.push(candidate.value);
+    const locator = locatorFor2(page, candidate);
+    if (locator === void 0) continue;
+    const count = await locator.count().catch(() => 0);
+    if (count === 0) continue;
+    if (candidate === step.locators[0]) {
+      return { healed: false, attempted, reason: 'the original locator still works' };
+    }
+    const original = step.locators[0];
+    const from = original?.value ?? '(unknown)';
+    const unchanged = describeUnchanged(original, candidate);
+    const repaired = {
+      ...step,
+      locators: [candidate, ...step.locators.filter((c) => c !== candidate)],
+    };
+    const drift = {
+      stepIndex: step.index,
+      from,
+      to: candidate.value,
+      unchanged,
+      at: /* @__PURE__ */ new Date().toISOString(),
+      reason: `the original locator no longer matched; ${candidate.value} did`,
+    };
+    driftLog.add(drift);
+    return { healed: true, step: repaired, drift, attempted };
+  }
+  return {
+    healed: false,
+    attempted,
+    reason: `no recorded locator matched: ${attempted.join(', ')}`,
+  };
+}
+function describeUnchanged(original, replacement) {
+  if (original === void 0) return 'no original locator';
+  if (
+    original.strategy === 'role' &&
+    replacement.strategy === 'role' &&
+    original.role === replacement.role &&
+    original.name === replacement.name
+  ) {
+    return 'role/name unchanged';
+  }
+  if (original.strategy === 'role' && replacement.role !== void 0) {
+    if (original.role === replacement.role) return 'role unchanged';
+    if (original.name === replacement.name) return 'name unchanged';
+  }
+  if (original.strategy === 'testid' && replacement.testId === original.testId) {
+    return 'test id unchanged';
+  }
+  if (original.strategy === 'label' && replacement.label === original.label) {
+    return 'label unchanged';
+  }
+  if (original.strategy === 'text' && replacement.text === original.text) {
+    return 'text unchanged';
+  }
+  return 'the element is the same, the way of finding it changed';
+}
+function locatorFor2(page, candidate) {
+  switch (candidate.strategy) {
+    case 'ref':
+      try {
+        return page.getByRef(candidate.value);
+      } catch {
+        return void 0;
+      }
+    case 'role':
+      if (candidate.role === void 0) return void 0;
+      return page.getByRole(candidate.role, {
+        ...(candidate.name !== void 0 ? { name: candidate.name } : {}),
+      });
+    case 'label':
+      if (candidate.label === void 0) return void 0;
+      return page.getByLabel(candidate.label);
+    case 'text':
+      if (candidate.text === void 0) return void 0;
+      return page.getByText(candidate.text);
+    case 'testid':
+      if (candidate.testId === void 0) return void 0;
+      return page.getByTestId(candidate.testId);
+    case 'css':
+      if (candidate.css === void 0) return void 0;
+      return page.locator(candidate.css);
+    default:
+      return void 0;
+  }
+}
+var DriftLog;
+var init_heal = __esm({
+  'src/compile/heal.ts'() {
+    'use strict';
+    DriftLog = class {
+      entries = [];
+      /** Record a change. */
+      add(entry) {
+        this.entries.push(entry);
+      }
+      /** Every recorded change. */
+      get all() {
+        return this.entries;
+      }
+      /** How many changes were recorded. */
+      get size() {
+        return this.entries.length;
+      }
+      /** The changes for one step. */
+      forStep(stepIndex) {
+        return this.entries.filter((entry) => entry.stepIndex === stepIndex);
+      }
+      /** Render the drift as a report. */
+      render() {
+        if (this.entries.length === 0)
+          return 'No drift: every step still uses its original locator.';
+        const lines = [
+          `${this.entries.length} drift entr${this.entries.length === 1 ? 'y' : 'ies'}:`,
+          '',
+        ];
+        for (const entry of this.entries) {
+          lines.push(
+            `  Step ${entry.stepIndex}: ${entry.from} \u2192 ${entry.to} (${entry.unchanged})`,
+          );
+          lines.push(`      ${entry.reason}`);
+        }
+        return lines.join('\n');
+      }
+    };
+  },
+});
+
+// src/compile/replay.ts
+async function replay(page, steps, options) {
+  const drift = new DriftLog();
+  const results = [];
+  const startedAt = Date.now();
+  let healedCount = 0;
+  for (const step of steps) {
+    const stepStarted = Date.now();
+    const attempted = [];
+    if (step.kind === 'goto') {
+      try {
+        const url = resolveValue(step.params.value, options.variables ?? {}) ?? step.pre.url;
+        await page.goto(url);
+        results.push({
+          index: step.index,
+          ok: true,
+          strategy: 'goto',
+          attempted: [url],
+          durationMs: Date.now() - stepStarted,
+          urlAfter: page.url(),
+          healed: false,
+        });
+      } catch (err) {
+        results.push({
+          index: step.index,
+          ok: false,
+          attempted: [],
+          message: err instanceof Error ? err.message : String(err),
+          durationMs: Date.now() - stepStarted,
+          urlAfter: page.url(),
+          healed: false,
+        });
+      }
+      continue;
+    }
+    let locator = void 0;
+    let strategy;
+    let workingStep = step;
+    const primary = step.locators[0];
+    if (primary !== void 0) {
+      attempted.push(primary.value);
+      const built = locatorFor2(page, primary);
+      if (built !== void 0) {
+        const count = await built.count().catch(() => 0);
+        if (count > 0) {
+          locator = built;
+          strategy = primary.strategy;
+        }
+      }
+    }
+    if (locator === void 0 && options.heal) {
+      const healed = await healStep(page, step, drift);
+      attempted.push(...healed.attempted);
+      if (healed.healed && healed.step !== void 0) {
+        workingStep = healed.step;
+        healedCount += 1;
+        const repaired = healed.step.locators[0];
+        if (repaired !== void 0) {
+          const built = locatorFor2(page, repaired);
+          if (built !== void 0) {
+            const count = await built.count().catch(() => 0);
+            if (count > 0) {
+              locator = built;
+              strategy = repaired.strategy;
+            }
+          }
+        }
+      }
+    }
+    if (locator === void 0 && !options.heal) {
+      for (const candidate of step.locators.slice(1)) {
+        attempted.push(candidate.value);
+        const built = locatorFor2(page, candidate);
+        if (built === void 0) continue;
+        const count = await built.count().catch(() => 0);
+        if (count > 0) {
+          locator = built;
+          strategy = candidate.strategy;
+          break;
+        }
+      }
+    }
+    if (locator === void 0) {
+      results.push({
+        index: step.index,
+        ok: false,
+        attempted,
+        message: `no locator matched: ${attempted.join(', ')}`,
+        durationMs: Date.now() - stepStarted,
+        urlAfter: page.url(),
+        healed: false,
+      });
+      continue;
+    }
+    try {
+      await performStep(page, workingStep, locator, options.variables ?? {});
+      results.push({
+        index: step.index,
+        ok: true,
+        ...(strategy !== void 0 ? { strategy } : {}),
+        attempted,
+        durationMs: Date.now() - stepStarted,
+        urlAfter: page.url(),
+        healed: workingStep !== step,
+      });
+    } catch (err) {
+      results.push({
+        index: step.index,
+        ok: false,
+        ...(strategy !== void 0 ? { strategy } : {}),
+        attempted,
+        message: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - stepStarted,
+        urlAfter: page.url(),
+        healed: false,
+      });
+    }
+  }
+  return {
+    ok: results.every((r) => r.ok),
+    steps: results,
+    drift,
+    healedCount,
+    durationMs: Date.now() - startedAt,
+  };
+}
+async function performStep(page, step, locator, variables) {
+  const value = resolveValue(step.params.value, variables);
+  switch (step.kind) {
+    case 'goto':
+      await page.goto(value ?? step.pre.url);
+      break;
+    case 'click':
+      await locator.click();
+      break;
+    case 'dblclick':
+      await locator.dblclick();
+      break;
+    case 'hover':
+      await locator.hover();
+      break;
+    case 'fill':
+      await locator.fill(value ?? '');
+      break;
+    case 'type':
+      await locator.pressSequentially(value ?? '', { delay: 20 });
+      break;
+    case 'select':
+      await locator.selectOption(step.params.option ?? '');
+      break;
+    case 'check':
+      await locator.check();
+      break;
+    case 'uncheck':
+      await locator.uncheck();
+      break;
+    case 'press':
+      await locator.press(step.params.key ?? 'Enter');
+      break;
+    case 'upload':
+      await locator.setInputFiles(step.params.file ?? '');
+      break;
+    case 'scroll':
+      await page.mouse.wheel(0, step.params.amount ?? 0);
+      break;
+    case 'wait':
+      await locator.waitFor({ state: step.params.condition ?? 'visible' });
+      break;
+    default:
+      break;
+  }
+}
+function resolveValue(value, variables) {
+  if (value === void 0) return void 0;
+  const match = /^\{\{(\w+)\}\}$/.exec(value);
+  if (match === null) return value;
+  const name = match[1] ?? '';
+  return variables[name] ?? value;
+}
+function parseVariables(pairs) {
+  const variables = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) continue;
+    const key = pair.slice(0, eq);
+    const value = pair.slice(eq + 1);
+    if (key.length === 0) continue;
+    variables[key] = value;
+  }
+  return variables;
+}
+function renderReplay(result) {
+  const lines = [];
+  lines.push(
+    result.ok
+      ? `Replay succeeded: ${result.steps.length} step(s) in ${result.durationMs}ms.`
+      : `Replay failed: ${result.steps.filter((s) => !s.ok).length} of ${result.steps.length} step(s) failed.`,
+  );
+  if (result.healedCount > 0) {
+    lines.push(`${result.healedCount} step(s) were healed.`);
+    lines.push(result.drift.render());
+  }
+  for (const step of result.steps) {
+    if (step.ok) {
+      lines.push(`  ${step.index}: ok (${step.strategy ?? 'unknown'})`);
+    } else {
+      lines.push(`  ${step.index}: FAILED \u2014 ${step.message ?? 'unknown reason'}`);
+      lines.push(`      tried: ${step.attempted.join(', ')}`);
+    }
+  }
+  return lines.join('\n');
+}
+var init_replay = __esm({
+  'src/compile/replay.ts'() {
+    'use strict';
+    init_heal();
+  },
+});
+
+// src/core/runstore/store.ts
+import {
+  appendFile,
+  mkdir as mkdir5,
+  readFile as readFile6,
+  writeFile as writeFile6,
+} from 'fs/promises';
+import { join as join4 } from 'path';
+import { randomUUID } from 'crypto';
+async function readRun(runId, cwd = process.cwd()) {
+  const store = new RunStore(runId, cwd);
+  const recorded = await store.readRecorded();
+  if (recorded === void 0) {
+    throw new Error(
+      `the run ${runId} has no recording. Only runs made with the recorder can be compiled.`,
+    );
+  }
+  return recorded;
+}
+function newRunId(now = /* @__PURE__ */ new Date()) {
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
+  return `${stamp}-${randomUUID().slice(0, 8)}`;
+}
+var RunStore;
+var init_store = __esm({
+  'src/core/runstore/store.ts'() {
+    'use strict';
+    init_paths();
+    RunStore = class {
+      runId;
+      cwd;
+      startedAt;
+      stepCountValue = 0;
+      constructor(runId, cwd, startedAt = /* @__PURE__ */ new Date().toISOString()) {
+        this.runId = runId;
+        this.cwd = cwd;
+        this.startedAt = startedAt;
+      }
+      /** The root directory of the run. */
+      get dir() {
+        return runDir(this.runId, this.cwd);
+      }
+      /** Create the run's directories. */
+      async init() {
+        await mkdir5(join4(this.dir, 'steps'), { recursive: true });
+      }
+      /** Append a line to the audit log. */
+      async audit(record) {
+        await mkdir5(this.dir, { recursive: true });
+        const line = `${JSON.stringify({ ts: /* @__PURE__ */ new Date().toISOString(), ...record })}
+`;
+        await appendFile(auditPath(this.runId, this.cwd), line, 'utf8');
+      }
+      /** Read the audit log. */
+      async readAudit() {
+        try {
+          const raw = await readFile6(auditPath(this.runId, this.cwd), 'utf8');
+          return raw
+            .split('\n')
+            .filter((line) => line.trim().length > 0)
+            .map((line) => JSON.parse(line));
+        } catch {
+          return [];
+        }
+      }
+      /** Write the full snapshot text for a step. */
+      async writeSnapshot(step, text) {
+        const dir = stepDir(this.runId, step, this.cwd);
+        await mkdir5(dir, { recursive: true });
+        const path = join4(dir, 'aria.txt');
+        await writeFile6(path, text, 'utf8');
+        return path;
+      }
+      /** Write the screenshot for a step. */
+      async writeScreenshot(step, data) {
+        const dir = stepDir(this.runId, step, this.cwd);
+        await mkdir5(dir, { recursive: true });
+        const path = join4(dir, 'screenshot.png');
+        await writeFile6(path, data);
+        return path;
+      }
+      /** Write the state snapshot for a step. */
+      async writeState(step, state) {
+        const dir = stepDir(this.runId, step, this.cwd);
+        await mkdir5(dir, { recursive: true });
+        const path = join4(dir, 'state.json');
+        await writeFile6(
+          path,
+          `${JSON.stringify(state, null, 2)}
+`,
+          'utf8',
+        );
+        return path;
+      }
+      /** Write the network slice for a step. */
+      async writeNetwork(step, network) {
+        const dir = stepDir(this.runId, step, this.cwd);
+        await mkdir5(dir, { recursive: true });
+        const path = join4(dir, 'net.json');
+        await writeFile6(
+          path,
+          `${JSON.stringify(network, null, 2)}
+`,
+          'utf8',
+        );
+        return path;
+      }
+      /** Write a step record to the audit log and return it. */
+      async recordStep(record) {
+        this.stepCountValue += 1;
+        await this.audit({ type: 'step', ...record });
+      }
+      /** Write the final result. */
+      async writeResult(result) {
+        await mkdir5(this.dir, { recursive: true });
+        await writeFile6(
+          join4(this.dir, 'result.json'),
+          `${JSON.stringify(result, null, 2)}
+`,
+          'utf8',
+        );
+      }
+      /**
+       * Write the recorded IR of the run.
+       *
+       * The IR is what `bv compile` reads, so it is kept separate from the
+       * audit log: the audit log is append-only and machine-oriented, the IR
+       * is the human-facing record of what the agent did.
+       */
+      async writeRecorded(recorded) {
+        await mkdir5(this.dir, { recursive: true });
+        const path = join4(this.dir, 'recorded.json');
+        await writeFile6(path, JSON.stringify(recorded, null, 2), 'utf8');
+        return path;
+      }
+      /** Read the run's recorded IR. */
+      async readRecorded() {
+        try {
+          const raw = await readFile6(join4(this.dir, 'recorded.json'), 'utf8');
+          return JSON.parse(raw);
+        } catch {
+          return void 0;
+        }
+      }
+      /** Read the run's result. */
+      async readResult() {
+        try {
+          const raw = await readFile6(join4(this.dir, 'result.json'), 'utf8');
+          return JSON.parse(raw);
+        } catch {
+          return void 0;
+        }
+      }
+      /** The run's start time. */
+      get started() {
+        return this.startedAt;
+      }
+      /** How many steps have been recorded. */
+      get stepCount() {
+        return this.stepCountValue;
+      }
+    };
+  },
+});
+
+// src/mcp/server.ts
+import { createInterface } from 'readline';
+function toolText(result) {
+  if (result === void 0) return '(no result)';
+  if (typeof result === 'string') return result;
+  if (typeof result === 'number' || typeof result === 'boolean' || result === null) {
+    return JSON.stringify(result) ?? 'null';
+  }
+  try {
+    return JSON.stringify(result, null, 2) ?? '(no result)';
+  } catch {
+    return Object.prototype.toString.call(result);
+  }
+}
+function toolResult(result, isError = false) {
+  return {
+    content: [{ type: 'text', text: toolText(result) }],
+    ...(isError ? { isError: true } : {}),
+    ...(result !== void 0 ? { structuredContent: result } : {}),
+  };
+}
+var MCP_PROTOCOL_VERSION,
+  RPC_METHOD_NOT_FOUND,
+  RPC_INVALID_PARAMS,
+  RPC_INTERNAL,
+  McpServer,
+  BROWSER_TOOLS;
+var init_server = __esm({
+  'src/mcp/server.ts'() {
+    'use strict';
+    MCP_PROTOCOL_VERSION = '2024-11-05';
+    RPC_METHOD_NOT_FOUND = -32601;
+    RPC_INVALID_PARAMS = -32602;
+    RPC_INTERNAL = -32603;
+    McpServer = class {
+      constructor(tools, toolDefinitions, serverInfo) {
+        this.tools = tools;
+        this.toolDefinitions = toolDefinitions;
+        this.serverInfo = serverInfo;
+      }
+      tools;
+      toolDefinitions;
+      serverInfo;
+      /**
+       * Handle one JSON-RPC message.
+       *
+       * Returns the response, or undefined for a notification (a message with
+       * no id), which gets no reply.
+       */
+      async handle(message) {
+        const id = message.id ?? null;
+        switch (message.method) {
+          case 'initialize':
+            return {
+              jsonrpc: '2.0',
+              id,
+              result: {
+                protocolVersion: MCP_PROTOCOL_VERSION,
+                capabilities: { tools: { listChanged: false } },
+                serverInfo: this.serverInfo,
+              },
+            };
+          case 'notifications/initialized':
+            return void 0;
+          case 'ping':
+            return { jsonrpc: '2.0', id, result: {} };
+          case 'tools/list':
+            return {
+              jsonrpc: '2.0',
+              id,
+              result: { tools: this.toolDefinitions },
+            };
+          case 'tools/call': {
+            const params = message.params ?? {};
+            const name = params['name'];
+            if (typeof name !== 'string') {
+              return {
+                jsonrpc: '2.0',
+                id,
+                error: { code: RPC_INVALID_PARAMS, message: 'the tool name is required' },
+              };
+            }
+            const handler = this.tools[name];
+            if (handler === void 0) {
+              return {
+                jsonrpc: '2.0',
+                id,
+                error: { code: RPC_METHOD_NOT_FOUND, message: `no tool named "${name}"` },
+              };
+            }
+            const rawArgs = params['arguments'];
+            const args = typeof rawArgs === 'object' && rawArgs !== null ? rawArgs : {};
+            try {
+              const result = await handler(args);
+              return { jsonrpc: '2.0', id, result };
+            } catch (err) {
+              return {
+                jsonrpc: '2.0',
+                id,
+                error: {
+                  code: RPC_INTERNAL,
+                  message: err instanceof Error ? err.message : String(err),
+                },
+              };
+            }
+          }
+          default:
+            return {
+              jsonrpc: '2.0',
+              id,
+              error: {
+                code: RPC_METHOD_NOT_FOUND,
+                message: `unknown method "${message.method}"`,
+              },
+            };
+        }
+      }
+      /**
+       * Serve the protocol over a pair of streams.
+       *
+       * Each line of the input is one JSON-RPC message.
+       */
+      async serve(input, output) {
+        const lines = createInterface({ input, crlfDelay: Infinity });
+        for await (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.length === 0) continue;
+          let message;
+          try {
+            message = JSON.parse(trimmed);
+          } catch (err) {
+            this.write(output, {
+              jsonrpc: '2.0',
+              id: null,
+              error: {
+                code: RPC_INVALID_PARAMS,
+                message: `the message is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            });
+            continue;
+          }
+          const response = await this.handle(message);
+          if (response !== void 0) this.write(output, response);
+        }
+      }
+      /** Write one response. */
+      write(output, response) {
+        output.write(`${JSON.stringify(response)}
+`);
+      }
+    };
+    BROWSER_TOOLS = [
+      {
+        name: 'snapshot',
+        description:
+          'Read the current page as a compact accessibility tree, with element refs. Use this before acting so you know what is there. It does not change the page.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            full: { type: 'boolean', description: 'include the whole tree, not a pruned one' },
+            maxTokens: { type: 'number', description: 'the token budget for the tree' },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'act',
+        description:
+          'Perform one action on the page. The action is checked against the plan, the policy and the taint tracker first. An action that needs approval is REFUSED and comes back with an approval id; use the approve tool with that id to run it. This tool never bypasses a policy check.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            kind: {
+              type: 'string',
+              enum: [
+                'click',
+                'dblclick',
+                'hover',
+                'fill',
+                'type',
+                'select',
+                'check',
+                'uncheck',
+                'press',
+                'scroll',
+                'upload',
+              ],
+              description: 'what to do',
+            },
+            target: { type: 'string', description: 'the element, e.g. role=button name="Sign in"' },
+            value: { type: 'string', description: 'the value to fill or type' },
+            approve: {
+              type: 'string',
+              description: 'an approval token, for an action that was refused',
+            },
+          },
+          required: ['kind', 'target'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'approve',
+        description:
+          'Issue an approval token for a pending action, so it can be run. An approval is single-use and bound to one exact action.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            actionId: { type: 'string', description: 'the approval id from the refusal' },
+          },
+          required: ['actionId'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'verify',
+        description:
+          'Check a success condition against the live page. Returns whether it passed and the evidence. A condition that is not met is reported as unverified, never as done.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            condition: {
+              type: 'object',
+              description:
+                'the condition: url_matches, text_visible, element, network_response, storage or llm_judged, or a composition of them with all, any and not',
+            },
+          },
+          required: ['condition'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'extract',
+        description:
+          'Extract values from the page according to a JSON Schema. Every value carries its source, and a value that cannot be confirmed on a second read is reported as null.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            schema: { type: 'object', description: 'the JSON Schema to extract against' },
+          },
+          required: ['schema'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'compile',
+        description:
+          'Compile a recorded run into a plain Playwright TypeScript script. The script imports nothing from browser-verified, so it runs in any Playwright project.',
+        inputSchema: {
+          type: 'object',
+          properties: { runId: { type: 'string', description: 'the run to compile' } },
+          required: ['runId'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'replay',
+        description:
+          'Replay a recorded run deterministically, with no LLM cost. A step whose locator broke can be healed from the recorded fallbacks, and the change is reported as drift.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            runId: { type: 'string', description: 'the run to replay' },
+            variables: {
+              type: 'object',
+              description: 'the values of the flow variables',
+              additionalProperties: { type: 'string' },
+            },
+            heal: { type: 'boolean', description: 'repair a step whose locator broke' },
+          },
+          required: ['runId'],
+          additionalProperties: false,
+        },
+      },
+    ];
+  },
+});
+
+// src/mcp/wiring.ts
+var wiring_exports = {};
+__export(wiring_exports, {
+  checkDaemon: () => checkDaemon,
+  createMcpServer: () => createMcpServer,
+});
+async function createMcpServer(options) {
+  const client = await connectDaemon(options.cwd);
+  const registry2 = {
+    snapshot: async (args) => {
+      const result = await client.call('snapshot', {
+        ...(args['full'] === true ? { full: true } : {}),
+        ...(typeof args['maxTokens'] === 'number' ? { maxTokens: args['maxTokens'] } : {}),
+      });
+      return toolResult(result);
+    },
+    act: async (args) => {
+      const kind = args['kind'];
+      const target = args['target'];
+      if (typeof kind !== 'string' || typeof target !== 'string') {
+        return toolResult({ error: 'the act tool needs a kind and a target' }, true);
+      }
+      const result = await client.call('act', {
+        kind,
+        target,
+        ...(typeof args['value'] === 'string' ? { value: args['value'] } : {}),
+        // The tool calls the argument `approve`; the daemon calls it
+        // `approvalToken`.
+        ...(typeof args['approve'] === 'string' ? { approvalToken: args['approve'] } : {}),
+      });
+      return toolResult(result, result.ok !== true);
+    },
+    approve: async (args) => {
+      const actionId = args['actionId'];
+      if (typeof actionId !== 'string') {
+        return toolResult({ error: 'the approve tool needs an actionId' }, true);
+      }
+      const result = await client.call('approve.issue', {
+        actionId,
+      });
+      return toolResult(result, result.ok !== true);
+    },
+    verify: async (args) => {
+      const condition = args['condition'];
+      if (condition === void 0) {
+        return toolResult({ error: 'the verify tool needs a condition' }, true);
+      }
+      const result = await client.call('verify', {
+        condition,
+      });
+      return toolResult(result, result.passed !== true);
+    },
+    extract: async (args) => {
+      const schema = args['schema'];
+      if (schema === void 0) {
+        return toolResult({ error: 'the extract tool needs a schema' }, true);
+      }
+      const result = await client.call('extract', { schema });
+      return toolResult(result);
+    },
+    compile: async (args) => {
+      const runId = args['runId'];
+      if (typeof runId !== 'string') {
+        return toolResult({ error: 'the compile tool needs a runId' }, true);
+      }
+      const result = await client.call('compile', { runId });
+      return toolResult(result);
+    },
+    replay: async (args) => {
+      const runId = args['runId'];
+      if (typeof runId !== 'string') {
+        return toolResult({ error: 'the replay tool needs a runId' }, true);
+      }
+      const result = await client.call('replay', {
+        runId,
+        ...(args['heal'] === true ? { heal: true } : {}),
+        ...(typeof args['variables'] === 'object' && args['variables'] !== null
+          ? { variables: args['variables'] }
+          : {}),
+      });
+      return toolResult(result, result.ok !== true);
+    },
+  };
+  return new McpServer(registry2, BROWSER_TOOLS, {
+    name: options.name ?? 'browser-verified',
+    version: options.version ?? '0.1.0',
+  });
+}
+async function checkDaemon(cwd) {
+  return connectDaemon(cwd);
+}
+var init_wiring = __esm({
+  'src/mcp/wiring.ts'() {
+    'use strict';
+    init_client();
+    init_server();
+  },
+});
+
+// src/core/browser.ts
+import { chromium } from 'playwright';
+async function launchChromium(options = {}) {
+  const headless = options.headed !== true;
+  const launchOptions = { headless };
+  try {
+    return await chromium.launch(launchOptions);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("Executable doesn't exist")) throw err;
+    return chromium.launch({ ...launchOptions, channel: 'chromium' });
+  }
+}
+var init_browser = __esm({
+  'src/core/browser.ts'() {
+    'use strict';
+  },
+});
+
 // src/core/daemon.ts
 import { createServer } from 'http';
 import { randomBytes as randomBytes3 } from 'crypto';
@@ -1206,31 +2326,16 @@ var init_daemon = __esm({
   },
 });
 
-// src/core/browser.ts
-import { chromium } from 'playwright';
-async function launchChromium(options = {}) {
-  const headless = options.headed !== true;
-  const launchOptions = { headless };
-  try {
-    return await chromium.launch(launchOptions);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes("Executable doesn't exist")) throw err;
-    return chromium.launch({ ...launchOptions, channel: 'chromium' });
-  }
-}
-var init_browser = __esm({
-  'src/core/browser.ts'() {
-    'use strict';
-  },
-});
-
 // src/core/contexts.ts
 var SessionState;
 var init_contexts = __esm({
   'src/core/contexts.ts'() {
     'use strict';
     SessionState = class {
+      /** The URL of the active page, when there is one. */
+      currentUrl() {
+        return this.pages[this.activeIndex]?.url();
+      }
       browser;
       context;
       pages = [];
@@ -1246,6 +2351,30 @@ var init_contexts = __esm({
         if (this.context !== void 0) return this.context;
         const contextOptions = {};
         if (options.userAgent !== void 0) contextOptions.userAgent = options.userAgent;
+        this.context = await this.browser.newContext(contextOptions);
+        return this.context;
+      }
+      /**
+       * Replace the context with one that has the given storage state.
+       *
+       * Playwright applies a storage state when a context is created, so
+       * restoring one means creating a new context. The pages of the old
+       * context are closed and a fresh one is opened in the new context.
+       */
+      async replaceContext(options) {
+        const oldPages = [...this.pages];
+        this.pages = [];
+        this.activeIndex = 0;
+        if (this.context !== void 0) {
+          await this.context.close().catch(() => void 0);
+          this.context = void 0;
+        }
+        for (const page of oldPages) {
+          await page.close().catch(() => void 0);
+        }
+        const contextOptions = {};
+        if (options.userAgent !== void 0) contextOptions.userAgent = options.userAgent;
+        if (options.storageState !== void 0) contextOptions.storageState = options.storageState;
         this.context = await this.browser.newContext(contextOptions);
         return this.context;
       }
@@ -1897,7 +3026,7 @@ function renderChange(change) {
       return `${indent}? ${change.role}${ref}`;
   }
 }
-function renderDiff(diff, options = {}) {
+function renderDiff2(diff, options = {}) {
   const maxChanges = options.maxChanges ?? DEFAULT_MAX_CHANGES;
   const lines = [renderHeader(diff.header, options.notes, options)];
   if (diff.navigated) {
@@ -2306,6 +3435,52 @@ var init_session = __esm({
         this.browser = void 0;
         this.state = void 0;
       }
+      /**
+       * The network responses seen in this session.
+       *
+       * The verifier uses these for the `network_response` condition.
+       */
+      networkFacts = [];
+      /** The current URL, when the browser is running. */
+      get currentUrl() {
+        return this.state?.currentUrl();
+      }
+      /**
+       * Replace the browser context's storage state.
+       *
+       * Playwright applies a storage state when a context is created, so the
+       * context is replaced. The active page is re-opened in the new context.
+       */
+      async replaceStorageState(storageState) {
+        await this.sessionState.replaceContext({
+          storageState,
+          userAgent: this.userAgent,
+        });
+      }
+      /**
+       * The storage state, as a flat map of key to value.
+       *
+       * Local storage and session storage are read; cookies are not included
+       * because their values are secrets and are masked elsewhere.
+       */
+      async storageSnapshot() {
+        const page = await this.page();
+        const storage = await page
+          .evaluate(() => {
+            const result = {};
+            for (let i = 0; i < window.localStorage.length; i++) {
+              const key = window.localStorage.key(i);
+              if (key !== null) result[`local:${key}`] = window.localStorage.getItem(key) ?? '';
+            }
+            for (let i = 0; i < window.sessionStorage.length; i++) {
+              const key = window.sessionStorage.key(i);
+              if (key !== null) result[`session:${key}`] = window.sessionStorage.getItem(key) ?? '';
+            }
+            return result;
+          })
+          .catch(() => ({}));
+        return storage;
+      }
       /** Launch the browser. */
       async launch() {
         if (this.browser !== void 0) return;
@@ -2473,7 +3648,7 @@ var init_session = __esm({
         return {
           ...outcome,
           step: record,
-          diff: renderDiff(capture.diff, {
+          diff: renderDiff2(capture.diff, {
             ...(capture.previousUrl !== void 0 ? { previousUrl: capture.previousUrl } : {}),
           }),
         };
@@ -2543,133 +3718,6 @@ var init_session = __esm({
       /** The browser name. */
       get browserName() {
         return 'chromium';
-      }
-    };
-  },
-});
-
-// src/core/runstore/store.ts
-import {
-  appendFile,
-  mkdir as mkdir5,
-  readFile as readFile6,
-  writeFile as writeFile6,
-} from 'fs/promises';
-import { join as join4 } from 'path';
-import { randomUUID } from 'crypto';
-function newRunId(now = /* @__PURE__ */ new Date()) {
-  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
-  return `${stamp}-${randomUUID().slice(0, 8)}`;
-}
-var RunStore;
-var init_store = __esm({
-  'src/core/runstore/store.ts'() {
-    'use strict';
-    init_paths();
-    RunStore = class {
-      runId;
-      cwd;
-      startedAt;
-      constructor(runId, cwd, startedAt = /* @__PURE__ */ new Date().toISOString()) {
-        this.runId = runId;
-        this.cwd = cwd;
-        this.startedAt = startedAt;
-      }
-      /** The root directory of the run. */
-      get dir() {
-        return runDir(this.runId, this.cwd);
-      }
-      /** Create the run's directories. */
-      async init() {
-        await mkdir5(join4(this.dir, 'steps'), { recursive: true });
-      }
-      /** Append a line to the audit log. */
-      async audit(record) {
-        await mkdir5(this.dir, { recursive: true });
-        const line = `${JSON.stringify({ ts: /* @__PURE__ */ new Date().toISOString(), ...record })}
-`;
-        await appendFile(auditPath(this.runId, this.cwd), line, 'utf8');
-      }
-      /** Read the audit log. */
-      async readAudit() {
-        try {
-          const raw = await readFile6(auditPath(this.runId, this.cwd), 'utf8');
-          return raw
-            .split('\n')
-            .filter((line) => line.trim().length > 0)
-            .map((line) => JSON.parse(line));
-        } catch {
-          return [];
-        }
-      }
-      /** Write the full snapshot text for a step. */
-      async writeSnapshot(step, text) {
-        const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, 'aria.txt');
-        await writeFile6(path, text, 'utf8');
-        return path;
-      }
-      /** Write the screenshot for a step. */
-      async writeScreenshot(step, data) {
-        const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, 'screenshot.png');
-        await writeFile6(path, data);
-        return path;
-      }
-      /** Write the state snapshot for a step. */
-      async writeState(step, state) {
-        const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, 'state.json');
-        await writeFile6(
-          path,
-          `${JSON.stringify(state, null, 2)}
-`,
-          'utf8',
-        );
-        return path;
-      }
-      /** Write the network slice for a step. */
-      async writeNetwork(step, network) {
-        const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, 'net.json');
-        await writeFile6(
-          path,
-          `${JSON.stringify(network, null, 2)}
-`,
-          'utf8',
-        );
-        return path;
-      }
-      /** Write a step record to the audit log and return it. */
-      async recordStep(record) {
-        await this.audit({ type: 'step', ...record });
-      }
-      /** Write the final result. */
-      async writeResult(result) {
-        await mkdir5(this.dir, { recursive: true });
-        await writeFile6(
-          join4(this.dir, 'result.json'),
-          `${JSON.stringify(result, null, 2)}
-`,
-          'utf8',
-        );
-      }
-      /** Read the final result. */
-      async readResult() {
-        try {
-          const raw = await readFile6(join4(this.dir, 'result.json'), 'utf8');
-          return JSON.parse(raw);
-        } catch {
-          return void 0;
-        }
-      }
-      /** The run's start time. */
-      get started() {
-        return this.startedAt;
       }
     };
   },
@@ -2924,13 +3972,13 @@ var init_taint = __esm({
 
 // src/safety/injection/detectors.ts
 import { randomBytes as randomBytes5 } from 'crypto';
-function severityRank(severity) {
+function severityRank2(severity) {
   return SEVERITY_ORDER[severity];
 }
 function worstSeverity(findings) {
   let worst;
   for (const finding of findings) {
-    if (worst === void 0 || severityRank(finding.severity) > severityRank(worst)) {
+    if (worst === void 0 || severityRank2(finding.severity) > severityRank2(worst)) {
       worst = finding.severity;
     }
   }
@@ -2974,15 +4022,21 @@ function findExfiltrationUrls(text) {
   while ((match = urlPattern.exec(text)) !== null) {
     const url = match[0];
     const queryStart = url.indexOf('?');
-    if (queryStart === -1) continue;
-    const query = url.slice(queryStart + 1);
-    for (const part of query.split('&')) {
-      const eq = part.indexOf('=');
-      const key = (eq === -1 ? part : part.slice(0, eq)).toLowerCase();
-      if (EXFIL_KEYS.some((k) => key === k || key.includes(k))) {
-        hits.push({ url, key, index: match.index });
-        break;
+    if (queryStart !== -1) {
+      const query = url.slice(queryStart + 1);
+      for (const part of query.split('&')) {
+        const eq = part.indexOf('=');
+        const key = (eq === -1 ? part : part.slice(0, eq)).toLowerCase();
+        if (EXFIL_KEYS.some((k) => key === k || key.includes(k))) {
+          hits.push({ url, key, index: match.index });
+          break;
+        }
       }
+      continue;
+    }
+    const context = text.slice(Math.max(0, match.index - 80), match.index).toLowerCase();
+    if (EXFIL_CONTEXT.some((phrase) => context.includes(phrase))) {
+      hits.push({ url, key: 'context', index: match.index });
     }
   }
   return hits;
@@ -3020,6 +4074,7 @@ var SEVERITY_ORDER,
   INVISIBLE_CHARACTERS,
   BASE64_MIN_LENGTH,
   EXFIL_KEYS,
+  EXFIL_CONTEXT,
   SUSPICIOUS_FIELD_NAMES,
   InjectionScanner;
 var init_detectors = __esm({
@@ -3033,34 +4088,62 @@ var init_detectors = __esm({
     };
     DEFAULT_INSTRUCTION_PHRASES = [
       // English
+      //
+      // The list is deliberately long and deliberately redundant. A phrase
+      // detector that only catches one wording of an attack is not a detector.
+      // The red-team suite in `test/redteam/guards.test.ts` is what keeps this
+      // list honest: every phrase there has to be caught by one of these.
       'ignore previous',
+      'ignore the previous',
+      'ignore any previous',
       'ignore all previous',
+      'ignore everything above',
       'ignore the above',
+      'ignore the instructions',
+      'ignore your instructions',
+      'ignore prior',
+      'ignore the prior',
       'disregard previous',
+      'disregard the previous',
       'disregard the above',
       'forget previous',
+      'forget the previous',
       'forget everything above',
+      'forget all',
       'system prompt',
       'your system prompt',
+      'the system prompt',
       'new instructions',
       'updated instructions',
+      'additional instructions',
       'you must now',
       'you should now',
+      'you must immediately',
+      'you must run',
+      'you are required to',
       'do not tell the user',
       "don't tell the user",
       'do not mention',
+      'do not inform the user',
       'without telling the user',
+      'without asking the user',
+      'without informing the user',
       'reveal the',
       'reveal your',
       'reveal secret',
+      'reveal your secret',
       'print your instructions',
+      'show your instructions',
       'send this page to',
       'send the page to',
+      'send the vault',
       'email this page to',
       'forward this page to',
       'post this to',
+      'post the vault',
       'exfiltrate',
       'click the link below',
+      'follow the link below',
       'approve this payment',
       'approve the following',
       'authorize this payment',
@@ -3074,10 +4157,12 @@ var init_detectors = __esm({
       'override your instructions',
       'override previous',
       'act as the administrator',
+      'developer mode',
       'you are now',
       'your new role',
       'do not access',
       'bypass your',
+      'bypass the',
     ];
     DEFAULT_FAKE_BANNER_PATTERNS = [
       /\b(system|admin|administrator|root|support|moderator|operator)\s*(message|notice|alert|warning|instruction|update)\b/i,
@@ -3210,6 +4295,23 @@ var init_detectors = __esm({
       'context',
       'creds',
       'credentials',
+    ];
+    EXFIL_CONTEXT = [
+      'post the',
+      'post this',
+      'post your',
+      'send the',
+      'send this',
+      'send your',
+      'upload the',
+      'upload your',
+      'submit the',
+      'submit your',
+      'exfiltrate',
+      'collect the',
+      'forward the',
+      'email the',
+      'email this',
     ];
     SUSPICIOUS_FIELD_NAMES = [
       'prompt',
@@ -3454,10 +4556,10 @@ function evaluateAction(input, gate) {
       ruleIds.push('policy.approval_required');
     }
     if (input.approvalToken !== void 0) {
-      const hash2 = actionHashFor(input.intent);
+      const hash3 = actionHashFor(input.intent);
       const consumed = gate.approvals.consume(input.approvalToken, {
-        actionId: hash2,
-        actionHash: hash2,
+        actionId: hash3,
+        actionHash: hash3,
       });
       if (consumed.ok) {
         return {
@@ -3471,10 +4573,10 @@ function evaluateAction(input, gate) {
       reasons.push(consumed.reason);
       ruleIds.push(consumed.ruleId);
     }
-    const hash = actionHashFor(input.intent);
+    const hash2 = actionHashFor(input.intent);
     const request = gate.approvals.request({
-      actionId: hash,
-      actionHash: hash,
+      actionId: hash2,
+      actionHash: hash2,
       description: describeAction(input.intent, actionClass),
     });
     return {
@@ -3675,11 +4777,708 @@ var init_inspect = __esm({
   },
 });
 
+// src/verify/verifier.ts
+async function verify(condition, context) {
+  const results = [];
+  const evidence = [];
+  await evaluateCondition(condition, context, results, evidence);
+  const topLevel = results[results.length - 1];
+  return {
+    passed: topLevel !== void 0 && topLevel.passed,
+    results,
+    evidence,
+    verifiedAt: /* @__PURE__ */ new Date().toISOString(),
+    url: context.page.url(),
+  };
+}
+async function evaluateCondition(condition, context, results, evidence) {
+  if ('all' in condition) {
+    for (const child of condition.all) {
+      await evaluateCondition(child, context, results, evidence);
+    }
+    return;
+  }
+  if ('any' in condition) {
+    const before = results.length;
+    for (const child of condition.any) {
+      await evaluateCondition(child, context, results, evidence);
+    }
+    const branchResults = results.slice(before);
+    const anyPassed = branchResults.some((r) => r.passed);
+    results.push({
+      condition,
+      passed: anyPassed,
+      reason: anyPassed
+        ? `${branchResults.filter((r) => r.passed).length} of ${branchResults.length} branches passed`
+        : `none of the ${branchResults.length} branches passed`,
+      evidence: {
+        kind: 'snapshot',
+        value: branchResults.map((r) => r.reason),
+        url: context.page.url(),
+        capturedAt: /* @__PURE__ */ new Date().toISOString(),
+      },
+    });
+    return;
+  }
+  if ('not' in condition) {
+    const before = results.length;
+    await evaluateCondition(condition.not, context, results, evidence);
+    const inner = results[before];
+    results.push({
+      condition,
+      passed: inner === void 0 ? false : !inner.passed,
+      reason: inner === void 0 ? 'the inner condition was not evaluated' : `not (${inner.reason})`,
+      evidence: inner?.evidence ?? {
+        kind: 'snapshot',
+        value: null,
+        url: context.page.url(),
+        capturedAt: /* @__PURE__ */ new Date().toISOString(),
+      },
+    });
+    return;
+  }
+  const result = await evaluateLeaf(condition, context);
+  results.push(result);
+  evidence.push(result.evidence);
+}
+async function evaluateLeaf(condition, context) {
+  const url = context.page.url();
+  const capturedAt = /* @__PURE__ */ new Date().toISOString();
+  switch (condition.type) {
+    case 'url_matches': {
+      const matched = matchesPattern(url, condition.pattern);
+      return {
+        condition,
+        passed: matched,
+        reason: matched
+          ? `the url matches ${condition.pattern}`
+          : `the url "${url}" does not match ${condition.pattern}`,
+        evidence: { kind: 'url', value: url, url, capturedAt },
+      };
+    }
+    case 'text_visible': {
+      const found = await findVisibleText(context.page, condition.text);
+      return {
+        condition,
+        passed: found !== void 0,
+        reason:
+          found !== void 0
+            ? `the text "${condition.text}" is visible`
+            : `the text "${condition.text}" is not visible`,
+        evidence: {
+          kind: 'text',
+          value: condition.text,
+          url,
+          capturedAt,
+          ...(found?.domPath !== void 0 ? { domPath: found.domPath } : {}),
+          ...(found?.textSnippet !== void 0 ? { textSnippet: found.textSnippet } : {}),
+          ...(context.screenshotPath !== void 0 ? { screenshotPath: context.screenshotPath } : {}),
+        },
+      };
+    }
+    case 'element': {
+      const count = await countElements(context.page, condition);
+      const min = condition.min ?? 1;
+      const max = condition.max ?? Number.POSITIVE_INFINITY;
+      const passed = count >= min && count <= max;
+      return {
+        condition,
+        passed,
+        reason: passed
+          ? `found ${count} matching element(s), expected ${min}..${max === Number.POSITIVE_INFINITY ? '\u221E' : max}`
+          : `found ${count} matching element(s), expected ${min}..${max === Number.POSITIVE_INFINITY ? '\u221E' : max}`,
+        evidence: {
+          kind: 'element',
+          value: count,
+          url,
+          capturedAt,
+          ...(context.screenshotPath !== void 0 ? { screenshotPath: context.screenshotPath } : {}),
+        },
+      };
+    }
+    case 'network_response': {
+      const matches = (context.network ?? []).filter(
+        (fact) =>
+          matchesPattern(fact.url, condition.urlPattern) && fact.status === condition.status,
+      );
+      return {
+        condition,
+        passed: matches.length > 0,
+        reason:
+          matches.length > 0
+            ? `found ${matches.length} matching response(s)`
+            : `no response matching ${condition.urlPattern} with status ${condition.status}`,
+        evidence: {
+          kind: 'network',
+          value: matches,
+          url,
+          capturedAt,
+        },
+      };
+    }
+    case 'storage': {
+      const actual = context.storage?.[condition.key];
+      const passed = actual !== void 0 && matchesPattern(actual, condition.matches);
+      return {
+        condition,
+        passed,
+        reason: passed
+          ? `storage "${condition.key}" matches`
+          : `storage "${condition.key}" is ${actual === void 0 ? 'not set' : `"${actual}"`}, which does not match ${condition.matches}`,
+        evidence: {
+          kind: 'storage',
+          value: actual ?? null,
+          url,
+          capturedAt,
+        },
+      };
+    }
+    case 'llm_judged': {
+      return {
+        condition,
+        passed: false,
+        reason:
+          'this condition needs an LLM judgement, which Mode A does not have. The run is unverified.',
+        evidence: {
+          kind: 'snapshot',
+          value: condition.claim,
+          url,
+          capturedAt,
+          ...(context.snapshotPath !== void 0 ? { snapshotPath: context.snapshotPath } : {}),
+        },
+      };
+    }
+    default: {
+      const exhaustive = condition;
+      return {
+        condition: exhaustive,
+        passed: false,
+        reason: `unknown condition type: ${JSON.stringify(exhaustive)}`,
+        evidence: { kind: 'snapshot', value: null, url, capturedAt },
+      };
+    }
+  }
+}
+async function findVisibleText(page, text) {
+  const locator = page.getByText(text, { exact: false }).first();
+  const count = await locator.count().catch(() => 0);
+  if (count === 0) return void 0;
+  const result = await locator
+    .evaluate((element) => {
+      const el = element;
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      const visible =
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.opacity !== '0' &&
+        rect.width > 0 &&
+        rect.height > 0;
+      return {
+        visible,
+        tag: el.tagName.toLowerCase(),
+        text: (el.textContent ?? '').trim().slice(0, 200),
+      };
+    })
+    .catch(() => void 0);
+  if (result === void 0 || !result.visible) return void 0;
+  return {
+    domPath: result.tag,
+    textSnippet: result.text,
+  };
+}
+async function countElements(page, condition) {
+  const locator = page.getByRole(
+    condition.role,
+    condition.name !== void 0 ? { name: condition.name } : {},
+  );
+  const count = await locator.count().catch(() => 0);
+  return Math.min(count, MAX_COUNT);
+}
+function matchesPattern(value, pattern) {
+  const regexMatch = /^\/(.*)\/([gimsu]*)$/.exec(pattern);
+  if (regexMatch !== null) {
+    try {
+      return new RegExp(regexMatch[1] ?? '', regexMatch[2] ?? '').test(value);
+    } catch {
+      return value.includes(regexMatch[1] ?? pattern);
+    }
+  }
+  return value.includes(pattern);
+}
+var MAX_COUNT;
+var init_verifier = __esm({
+  'src/verify/verifier.ts'() {
+    'use strict';
+    MAX_COUNT = 1e3;
+  },
+});
+
+// src/verify/evidence.ts
+import { mkdir as mkdir8, writeFile as writeFile9 } from 'fs/promises';
+import { join as join5 } from 'path';
+function summarizeVerification(result) {
+  const lines = [];
+  if (result.passed) {
+    lines.push('VERIFIED: every condition passed.');
+  } else {
+    lines.push('UNVERIFIED: at least one condition did not pass.');
+  }
+  for (const item of result.results) {
+    lines.push(
+      `  ${item.passed ? 'pass' : 'FAIL'}  ${describeCondition(item.condition)}  \u2014 ${item.reason}`,
+    );
+  }
+  return lines.join('\n');
+}
+function asText2(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null) return 'null';
+  if (value === void 0) return 'undefined';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '(unserialisable)';
+  }
+}
+function describeCondition(condition) {
+  if (typeof condition !== 'object' || condition === null) return String(condition);
+  const record = condition;
+  if ('all' in record) return `all(${JSON.stringify(record['all'])})`;
+  if ('any' in record) return `any(${JSON.stringify(record['any'])})`;
+  if ('not' in record) return `not(${JSON.stringify(record['not'])})`;
+  switch (record['type']) {
+    case 'url_matches':
+      return `url matches ${String(record['pattern'])}`;
+    case 'text_visible':
+      return `text visible: ${String(record['text'])}`;
+    case 'element': {
+      const parts = [`element role=${asText2(record['role'])}`];
+      if (record['name'] !== void 0) parts.push(`name=${asText2(record['name'])}`);
+      if (record['min'] !== void 0) parts.push(`min=${asText2(record['min'])}`);
+      if (record['max'] !== void 0) parts.push(`max=${asText2(record['max'])}`);
+      return parts.join(' ');
+    }
+    case 'network_response':
+      return `network ${String(record['urlPattern'])} \u2192 ${String(record['status'])}`;
+    case 'storage':
+      return `storage ${String(record['key'])} matches ${String(record['matches'])}`;
+    case 'llm_judged':
+      return `llm judged: ${String(record['claim'])}`;
+    default:
+      return JSON.stringify(record);
+  }
+}
+var init_evidence = __esm({
+  'src/verify/evidence.ts'() {
+    'use strict';
+  },
+});
+
+// src/verify/extract.ts
+import { z as z3 } from 'zod';
+async function extract(page, schema, options = {}) {
+  const parsed = schema;
+  const properties = parsed.properties ?? {};
+  const required = new Set(parsed.required ?? []);
+  const fields = {};
+  const order = [];
+  const capturedAt = /* @__PURE__ */ new Date().toISOString();
+  const url = page.url();
+  for (const [name, fieldSchema] of Object.entries(properties)) {
+    order.push(name);
+    const description = readDescription(fieldSchema);
+    const found = await findValue(page, name, description);
+    if (found === void 0) {
+      fields[name] = {
+        value: null,
+        evidence: {
+          url,
+          domPath: '',
+          textSnippet: '',
+          capturedAt,
+          verified: false,
+          reason: required.has(name)
+            ? 'the required field was not found on the page'
+            : 'the field was not found on the page',
+          ...(options.screenshotPath !== void 0 ? { screenshotCrop: options.screenshotPath } : {}),
+        },
+      };
+      continue;
+    }
+    const confirmed = await confirmValue(page, found, found.value);
+    const verified = confirmed;
+    fields[name] = {
+      value: verified ? found.value : null,
+      evidence: {
+        url,
+        domPath: found.domPath,
+        textSnippet: found.textSnippet,
+        capturedAt,
+        verified,
+        ...(verified ? {} : { reason: 'the value could not be confirmed on a second read' }),
+        ...(options.screenshotPath !== void 0 ? { screenshotCrop: options.screenshotPath } : {}),
+      },
+    };
+  }
+  return {
+    fields,
+    order,
+    extractedAt: capturedAt,
+    url,
+    schema,
+  };
+}
+function readDescription(schema) {
+  if (typeof schema !== 'object' || schema === null) return void 0;
+  const description = schema['description'];
+  return typeof description === 'string' ? description : void 0;
+}
+async function findValue(page, name, description) {
+  const wanted = description ?? name;
+  const cellSelector = `dt:text-is("${wanted}") + dd, th:text-is("${wanted}") + td, td:text-is("${wanted}") + td`;
+  const paired = await page
+    .locator(cellSelector)
+    .first()
+    .textContent({ timeout: 2e3 })
+    .catch(() => void 0);
+  if (paired !== void 0 && paired !== null && paired.trim().length > 0) {
+    return {
+      value: paired.trim(),
+      strategy: 'paired-cell',
+      selector: cellSelector,
+      domPath: 'paired-cell',
+      textSnippet: paired.trim().slice(0, 200),
+      name,
+    };
+  }
+  const labelSelector = `label:text-is("${wanted}")`;
+  const labelled = await page
+    .locator(labelSelector)
+    .first()
+    .evaluate((element) => {
+      const label = element;
+      const control = label.control ?? label.querySelector('input, textarea, select');
+      if (control === null) return void 0;
+      const el = control;
+      return { value: (el.value ?? el.textContent ?? '').trim(), tag: el.tagName.toLowerCase() };
+    })
+    .catch(() => void 0);
+  if (labelled !== void 0 && labelled.value.length > 0) {
+    return {
+      value: labelled.value,
+      strategy: 'labelled-input',
+      selector: labelSelector,
+      domPath: `input.${labelled.tag}`,
+      textSnippet: `${wanted}: ${labelled.value}`.slice(0, 200),
+      name: wanted,
+    };
+  }
+  const textSelector = `text=/${escapeForRegex(wanted)}\\s*[:\uFF1A]/`;
+  const textValue = await page
+    .locator(textSelector)
+    .first()
+    .textContent({ timeout: 2e3 })
+    .catch(() => void 0);
+  if (textValue !== void 0 && textValue !== null) {
+    const match = new RegExp(`${escapeForRegex(wanted)}\\s*[:\uFF1A]\\s*([^\\n]+)`).exec(textValue);
+    const value = match?.[1]?.trim();
+    if (value !== void 0 && value.length > 0) {
+      return {
+        value,
+        strategy: 'text-pair',
+        selector: textSelector,
+        domPath: 'text',
+        textSnippet: textValue.trim().slice(0, 200),
+        name: wanted,
+      };
+    }
+  }
+  return void 0;
+}
+async function confirmValue(page, found, value) {
+  const again = await readWithStrategy(page, found);
+  if (again === void 0) return false;
+  return normalise(again) === normalise(value);
+}
+async function readWithStrategy(page, found) {
+  switch (found.strategy) {
+    case 'paired-cell': {
+      const text = await page
+        .locator(found.selector)
+        .first()
+        .textContent({ timeout: 2e3 })
+        .catch(() => void 0);
+      return text === void 0 || text === null ? void 0 : text.trim();
+    }
+    case 'labelled-input': {
+      const result = await page
+        .locator(found.selector)
+        .first()
+        .evaluate((element) => {
+          const label = element;
+          const control = label.control ?? label.querySelector('input, textarea, select');
+          if (control === null) return void 0;
+          const el = control;
+          return (el.value ?? el.textContent ?? '').trim();
+        })
+        .catch(() => void 0);
+      return result;
+    }
+    case 'text-pair': {
+      const text = await page
+        .locator(found.selector)
+        .first()
+        .textContent({ timeout: 2e3 })
+        .catch(() => void 0);
+      if (text === void 0 || text === null) return void 0;
+      const match = new RegExp(`${escapeForRegex(found.name)}\\s*[:\uFF1A]\\s*([^\\n]+)`).exec(
+        text,
+      );
+      return match?.[1]?.trim();
+    }
+    default:
+      return void 0;
+  }
+}
+function normalise(value) {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+function escapeForRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+var init_extract = __esm({
+  'src/verify/extract.ts'() {
+    'use strict';
+  },
+});
+
+// src/compile/recorder.ts
+function orderLocators(locators, winningStrategy) {
+  if (winningStrategy === void 0) return [...locators];
+  const winner = locators.find((candidate) => candidate.strategy === winningStrategy);
+  if (winner === void 0) return [...locators];
+  return [winner, ...locators.filter((candidate) => candidate !== winner)];
+}
+function candidatesFor(target) {
+  const candidates = [];
+  if (target.ref !== void 0) {
+    candidates.push({ strategy: 'ref', value: target.ref });
+  }
+  if (target.role !== void 0 && target.name !== void 0) {
+    candidates.push({
+      strategy: 'role',
+      value: `role=${target.role} name="${target.name}"`,
+      role: target.role,
+      name: target.name,
+    });
+  }
+  if (target.label !== void 0) {
+    candidates.push({ strategy: 'label', value: `label="${target.label}"`, label: target.label });
+  }
+  if (target.text !== void 0) {
+    candidates.push({ strategy: 'text', value: `text="${target.text}"`, text: target.text });
+  }
+  if (target.testId !== void 0) {
+    candidates.push({
+      strategy: 'testid',
+      value: `testid=${target.testId}`,
+      testId: target.testId,
+    });
+  }
+  if (target.css !== void 0) {
+    candidates.push({ strategy: 'css', value: target.css, css: target.css });
+  }
+  return candidates;
+}
+async function readPageText(page, limit = 2e3) {
+  const text = await page
+    .locator('body')
+    .innerText({ timeout: 2e3 })
+    .catch(() => '');
+  return text.slice(0, limit);
+}
+function diffText(before, after) {
+  const beforeLines = new Set(before.split('\n').map((line) => line.trim()));
+  const afterLines = new Set(after.split('\n').map((line) => line.trim()));
+  const added = [];
+  for (const line of afterLines) {
+    if (line.length > 0 && !beforeLines.has(line)) added.push(line);
+  }
+  const removed = [];
+  for (const line of beforeLines) {
+    if (line.length > 0 && !afterLines.has(line)) removed.push(line);
+  }
+  return { added: added.slice(0, 20), removed: removed.slice(0, 20) };
+}
+var Recorder;
+var init_recorder = __esm({
+  'src/compile/recorder.ts'() {
+    'use strict';
+    init_ir();
+    Recorder = class {
+      constructor(runId) {
+        this.runId = runId;
+      }
+      runId;
+      steps = [];
+      startedAt = /* @__PURE__ */ new Date().toISOString();
+      /**
+       * Record a successful action.
+       *
+       * The winning candidate is moved to the front of the list, so the
+       * compiled script tries the best locator first and the rest are
+       * fallbacks.
+       */
+      record(input) {
+        const locators = orderLocators(input.locators, input.winningStrategy);
+        const assertions = [];
+        const urlChange = urlAssertion(input.pre, input.post);
+        if (urlChange !== void 0) assertions.push(urlChange);
+        const textAdded = textAssertion(input.post);
+        if (textAdded !== void 0) assertions.push(textAdded);
+        const countChange = countAssertion(input.pre, input.post);
+        if (countChange !== void 0) assertions.push(countChange);
+        if (input.post.dialog !== void 0) {
+          assertions.push({
+            kind: 'dialog_appeared',
+            description: `a ${input.post.dialog.type} dialog appears: ${input.post.dialog.message}`,
+            value: input.post.dialog.message,
+          });
+        }
+        if (input.post.popup !== void 0) {
+          assertions.push({
+            kind: 'popup_appeared',
+            description: `a popup opens at ${input.post.popup.url}`,
+            value: input.post.popup.url,
+          });
+        }
+        const step = {
+          index: this.steps.length + 1,
+          kind: input.kind,
+          locators,
+          params: {
+            ...(input.value !== void 0 ? { value: input.value } : {}),
+            ...(input.file !== void 0 ? { file: input.file } : {}),
+            ...(input.key !== void 0 ? { key: input.key } : {}),
+            ...(input.option !== void 0 ? { option: input.option } : {}),
+            ...(input.condition !== void 0 ? { condition: input.condition } : {}),
+            ...(input.amount !== void 0 ? { amount: input.amount } : {}),
+          },
+          pre: input.pre,
+          post: input.post,
+          assertions,
+          durationMs: input.durationMs,
+          at: /* @__PURE__ */ new Date().toISOString(),
+        };
+        this.steps.push(step);
+        return step;
+      }
+      /** The steps recorded so far. */
+      get recorded() {
+        return this.steps;
+      }
+      /** How many steps have been recorded. */
+      get count() {
+        return this.steps.length;
+      }
+      /** Finish the recording and return the run. */
+      finish(goal) {
+        return {
+          runId: this.runId,
+          ...(goal !== void 0 ? { goal } : {}),
+          steps: this.steps,
+          startedAt: this.startedAt,
+          finishedAt: /* @__PURE__ */ new Date().toISOString(),
+        };
+      }
+    };
+  },
+});
+
+// src/compile/snapshots.ts
+import { readFile as readFile9, readdir as readdir2 } from 'fs/promises';
+import { join as join6 } from 'path';
+async function readSnapshots(runId, cwd = process.cwd()) {
+  const stepsDir = join6(runDir(runId, cwd), 'steps');
+  let entries;
+  try {
+    entries = await readdir2(stepsDir);
+  } catch {
+    return [];
+  }
+  const snapshots = [];
+  for (const entry of entries.sort()) {
+    const statePath = join6(stepsDir, entry, 'state.json');
+    try {
+      const raw = await readFile9(statePath, 'utf8');
+      const state = JSON.parse(raw);
+      snapshots.push({
+        step: Number.parseInt(entry, 10),
+        url: typeof state['url'] === 'string' ? state['url'] : '',
+        ariaPath: join6(stepsDir, entry, 'aria.txt'),
+        ...(typeof state['screenshotPath'] === 'string'
+          ? { screenshotPath: state['screenshotPath'] }
+          : {}),
+        statePath,
+        ...(typeof state['storageHash'] === 'string' ? { storageHash: state['storageHash'] } : {}),
+        ...(Array.isArray(state['cookies']) ? { cookies: state['cookies'] } : {}),
+        capturedAt: typeof state['capturedAt'] === 'string' ? state['capturedAt'] : '',
+      });
+    } catch {}
+  }
+  return snapshots;
+}
+async function findSnapshot(runId, step, cwd = process.cwd()) {
+  const snapshots = await readSnapshots(runId, cwd);
+  return snapshots.find((snapshot) => snapshot.step === step);
+}
+function planRewind(snapshot, step) {
+  if (snapshot === void 0) {
+    return {
+      url: '',
+      storageRestored: false,
+      notRestored: [
+        ...NOT_RESTORED,
+        `the state of step ${step}, because that step has no snapshot`,
+      ],
+    };
+  }
+  return {
+    url: snapshot.url,
+    // The storage state is restored only when there is one to restore.
+    storageRestored: snapshot.statePath !== void 0,
+    notRestored: [...NOT_RESTORED],
+  };
+}
+var NOT_RESTORED;
+var init_snapshots = __esm({
+  'src/compile/snapshots.ts'() {
+    'use strict';
+    init_paths();
+    NOT_RESTORED = [
+      'in-page JavaScript state (variables, closures, the DOM the script built)',
+      'server-side state (the database, the session, anything the server computed)',
+      'open network connections and service workers',
+      'the browser history and the back/forward stack',
+    ];
+  },
+});
+
 // src/core/daemon-process.ts
 var daemon_process_exports = {};
 __export(daemon_process_exports, {
+  createHandlers: () => createHandlers,
   runDaemonProcess: () => runDaemonProcess,
 });
+import { readFile as readFile10 } from 'fs/promises';
+function describeType(condition) {
+  if ('all' in condition) return 'all';
+  if ('any' in condition) return 'any';
+  if ('not' in condition) return 'not';
+  return condition.type;
+}
 async function scanForFindings(session, scanner) {
   const page = await session.page();
   const visible = await page
@@ -3792,28 +5591,10 @@ async function collectDomSignals(page) {
   }
   return raw;
 }
-async function runDaemonProcess(options) {
-  await ensureBvDir(options.cwd);
-  const runId = options.runId ?? newRunId();
-  const store = new RunStore(runId, options.cwd);
-  await store.init();
-  const userAgent = buildUserAgent(options.contactUrl);
-  let session;
-  const policy = await loadPolicy(options.cwd);
-  const planLock = new PlanLock();
-  const approvals = new ApprovalStore();
-  const scanner = new InjectionScanner();
-  const getSession = async () => {
-    if (session === void 0) {
-      session = new BrowserSession({
-        store,
-        userAgent,
-        headed: options.headed,
-      });
-      await session.launch();
-    }
-    return session;
-  };
+function createHandlers(context) {
+  const { store, policy, planLock, approvals, scanner, recorder, getSession } = context;
+  const runId = context.runId;
+  const options = { cwd: context.cwd, headed: context.headed === true };
   const handlers = {
     snapshot: async (request) => {
       const s = await getSession();
@@ -3827,7 +5608,7 @@ async function runDaemonProcess(options) {
       return {
         data: {
           header: capture.diff.header,
-          diff: renderDiff(capture.diff, {
+          diff: renderDiff2(capture.diff, {
             ...(capture.previousUrl !== void 0 ? { previousUrl: capture.previousUrl } : {}),
           }),
           tree: full ? renderTree(capture.pruned) : void 0,
@@ -3891,15 +5672,15 @@ async function runDaemonProcess(options) {
           ),
         ],
       };
-      const hash = hashAction({
+      const hash2 = hashAction({
         kind: 'plan.amend',
         target: JSON.stringify(amended),
       });
       const token = params['approvalToken'];
       if (typeof token !== 'string') {
         const request2 = approvals.request({
-          actionId: hash,
-          actionHash: hash,
+          actionId: hash2,
+          actionHash: hash2,
           description: `amend the plan to: ${amended.goal}`,
         });
         return {
@@ -3912,7 +5693,7 @@ async function runDaemonProcess(options) {
           exitCode: EXIT.NEEDS_APPROVAL,
         };
       }
-      const consumed = approvals.consume(token, { actionId: hash, actionHash: hash });
+      const consumed = approvals.consume(token, { actionId: hash2, actionHash: hash2 });
       if (!consumed.ok) {
         return {
           data: { ok: false, error: consumed.reason, ruleId: consumed.ruleId },
@@ -3955,6 +5736,138 @@ async function runDaemonProcess(options) {
     'approve.list': async () => ({
       data: { pending: approvals.listPending() },
     }),
+    // --- Rewind -----------------------------------------------------------
+    rewind: async (request) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const to = params['to'];
+      if (typeof to !== 'number' || !Number.isInteger(to) || to < 1) {
+        return { data: { error: '--to must be a step number' }, exitCode: EXIT.USAGE };
+      }
+      const sourceRun = typeof params['runId'] === 'string' ? params['runId'] : runId;
+      const snapshot = await findSnapshot(sourceRun, to, options.cwd);
+      const branchRunId =
+        typeof params['branchRunId'] === 'string' ? params['branchRunId'] : `${runId}-r${to}`;
+      const plan = planRewind(snapshot, to);
+      const page = await s.page();
+      if (snapshot?.statePath !== void 0) {
+        try {
+          const raw = await readFile10(snapshot.statePath, 'utf8');
+          const state = JSON.parse(raw);
+          if (state.storageState !== void 0) {
+            await s.replaceStorageState(state.storageState);
+          }
+        } catch {}
+      }
+      if (plan.url.length > 0) {
+        await page.goto(plan.url);
+      }
+      const branchStore = new RunStore(branchRunId, options.cwd);
+      await branchStore.init();
+      await branchStore.writeResult({
+        runId: branchRunId,
+        status: 'running',
+        steps: 0,
+        startedAt: /* @__PURE__ */ new Date().toISOString(),
+        ...(plan.url.length > 0 ? { finalUrl: plan.url } : {}),
+      });
+      return {
+        data: {
+          branchRunId,
+          toStep: to,
+          url: plan.url,
+          storageRestored: plan.storageRestored,
+          notRestored: plan.notRestored,
+          sourceRun,
+        },
+      };
+    },
+    // --- Verification ----------------------------------------------------
+    verify: async (request) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const condition = params['condition'];
+      const page = await s.page();
+      const network = s.networkFacts;
+      const storage = await s.storageSnapshot();
+      const result = await verify(condition, {
+        page,
+        ...(network !== void 0 ? { network } : {}),
+        ...(storage !== void 0 ? { storage } : {}),
+      });
+      await store.writeResult({
+        runId,
+        status: result.passed ? 'verified' : 'unverified',
+        steps: store.stepCount,
+        startedAt: store.started,
+        ...(s.currentUrl !== void 0 ? { finalUrl: s.currentUrl } : {}),
+        verification: {
+          passed: result.passed,
+          conditions: result.results.map((item) => ({
+            type: describeType(item.condition),
+            passed: item.passed,
+            detail: item.reason,
+          })),
+        },
+      });
+      return {
+        data: {
+          passed: result.passed,
+          results: result.results.map((item) => ({
+            condition: item.condition,
+            passed: item.passed,
+            reason: item.reason,
+          })),
+          evidence: result.evidence,
+          verifiedAt: result.verifiedAt,
+          url: result.url,
+          summary: summarizeVerification(result),
+        },
+        ...(result.passed ? {} : { exitCode: EXIT.VERIFICATION_FAILED }),
+      };
+    },
+    // --- Extraction -------------------------------------------------------
+    extract: async (request) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const schema = params['schema'];
+      const page = await s.page();
+      const result = await extract(page, schema);
+      return {
+        data: {
+          fields: result.fields,
+          order: result.order,
+          extractedAt: result.extractedAt,
+          url: result.url,
+        },
+      };
+    },
+    // --- Replay ----------------------------------------------------------
+    replay: async (request) => {
+      const s = await getSession();
+      const params = request.params ?? {};
+      const runId2 = params['runId'];
+      if (typeof runId2 !== 'string') {
+        return { data: { ok: false, error: 'runId is required' }, exitCode: EXIT.USAGE };
+      }
+      const run2 = await readRun(runId2, options.cwd);
+      const page = await s.page();
+      const result = await replay(page, run2.steps, {
+        heal: params['heal'] === true,
+        variables: params['variables'] ?? {},
+      });
+      return {
+        data: {
+          ok: result.ok,
+          steps: result.steps,
+          drift: result.drift.all,
+          healedCount: result.healedCount,
+          durationMs: result.durationMs,
+          summary: renderReplay(result),
+        },
+        ...(result.ok ? {} : { exitCode: EXIT.VERIFICATION_FAILED }),
+      };
+    },
     act: async (request) => {
       const s = await getSession();
       const params = request.params ?? {};
@@ -4032,12 +5945,31 @@ async function runDaemonProcess(options) {
         };
       }
       planLock.recordStep();
+      const textBefore = await readPageText(page);
       const outcome = await s.act({
         kind,
         target,
         ...(value !== void 0 ? { value } : {}),
         ...(params['force'] === true ? { force: true } : {}),
       });
+      if (outcome.ok) {
+        const textAfter = await readPageText(page);
+        const changes = diffText(textBefore, textAfter);
+        recorder.record({
+          kind,
+          locators: candidatesFor(target),
+          ...(outcome.strategy !== void 0 ? { winningStrategy: outcome.strategy } : {}),
+          ...(value !== void 0 ? { value } : {}),
+          pre: { url: outcome.urlBefore },
+          post: {
+            url: outcome.urlAfter,
+            addedText: changes.added,
+            removedText: changes.removed,
+          },
+          durationMs: outcome.durationMs,
+        });
+        await store.writeRecorded(recorder.finish());
+      }
       return {
         data: {
           ok: outcome.ok,
@@ -4061,7 +5993,20 @@ async function runDaemonProcess(options) {
       if (typeof url !== 'string') {
         return { data: { error: 'missing url' }, exitCode: EXIT.USAGE };
       }
+      const page = await s.page();
+      const urlBefore = page.url();
       const result = await s.goto(url);
+      if (result.ok) {
+        recorder.record({
+          kind: 'goto',
+          locators: [],
+          value: url,
+          pre: { url: urlBefore },
+          post: { url: result.url },
+          durationMs: 0,
+        });
+        await store.writeRecorded(recorder.finish());
+      }
       return {
         data: result,
         ...(result.ok ? {} : { exitCode: EXIT.FAILURE }),
@@ -4132,6 +6077,43 @@ async function runDaemonProcess(options) {
       return { data: { ok: true } };
     },
   };
+  return handlers;
+}
+async function runDaemonProcess(options) {
+  await ensureBvDir(options.cwd);
+  const runId = options.runId ?? newRunId();
+  const store = new RunStore(runId, options.cwd);
+  await store.init();
+  const userAgent = buildUserAgent(options.contactUrl);
+  let session;
+  const policy = await loadPolicy(options.cwd);
+  const planLock = new PlanLock();
+  const approvals = new ApprovalStore();
+  const scanner = new InjectionScanner();
+  const recorder = new Recorder(runId);
+  const getSession = async () => {
+    if (session === void 0) {
+      session = new BrowserSession({
+        store,
+        userAgent,
+        headed: options.headed,
+      });
+      await session.launch();
+    }
+    return session;
+  };
+  const handlers = createHandlers({
+    runId,
+    store,
+    cwd: options.cwd,
+    ...(options.headed !== void 0 ? { headed: options.headed } : {}),
+    policy,
+    planLock,
+    approvals,
+    scanner,
+    recorder,
+    getSession,
+  });
   const daemon = await startDaemon({
     handlers,
     session: options.session,
@@ -4181,6 +6163,13 @@ var init_daemon_process = __esm({
     init_taint();
     init_taint();
     init_detectors();
+    init_verifier();
+    init_evidence();
+    init_extract();
+    init_replay();
+    init_recorder();
+    init_store();
+    init_snapshots();
     ACTION_CLASS_SET = new Set(ACTION_CLASSES);
     ACTION_KINDS2 = [
       'click',
@@ -4201,43 +6190,8 @@ var init_daemon_process = __esm({
 
 // src/cli/main.ts
 init_exit();
+init_errors();
 import { Command, CommanderError } from 'commander';
-
-// src/core/errors.ts
-init_exit();
-var BvError = class extends Error {
-  exitCode;
-  /** Machine-readable reason codes, e.g. `policy.deny`, `plan.off_plan`. */
-  reasons;
-  /** Extra structured detail for `--json` output. */
-  detail;
-  constructor(message, options = {}) {
-    super(message, options.cause === void 0 ? void 0 : { cause: options.cause });
-    this.name = 'BvError';
-    this.exitCode = options.exitCode ?? EXIT.FAILURE;
-    this.reasons = options.reasons ?? [];
-    this.detail = options.detail ?? {};
-  }
-};
-var UsageError = class extends BvError {
-  constructor(message, detail = {}) {
-    super(message, { exitCode: EXIT.USAGE, detail });
-    this.name = 'UsageError';
-  }
-};
-var SessionError = class extends BvError {
-  constructor(message, detail = {}) {
-    super(message, { exitCode: EXIT.FAILURE, detail });
-    this.name = 'SessionError';
-  }
-};
-function toBvError(err) {
-  if (err instanceof BvError) return err;
-  if (err instanceof Error) {
-    return new BvError(err.message, { cause: err });
-  }
-  return new BvError(String(err));
-}
 
 // src/core/output.ts
 init_exit();
@@ -4554,82 +6508,10 @@ import { existsSync as existsSync3 } from 'fs';
 import { fileURLToPath as fileURLToPath3 } from 'url';
 import { dirname as dirname3, resolve as resolve4 } from 'path';
 init_exit();
-
-// src/core/client.ts
-init_daemon_info();
-var DEFAULT_TIMEOUT_MS = 12e4;
-async function connectDaemon(cwd) {
-  const info = await readDaemonInfo(cwd);
-  if (info === void 0) {
-    throw new SessionError('no running session found. Start one with `bv session start`.');
-  }
-  if (!isProcessAlive(info.pid)) {
-    throw new SessionError(
-      `the session process (pid ${info.pid}) is no longer running. Start a new one with \`bv session start\`.`,
-    );
-  }
-  const token = await readDaemonToken(cwd);
-  if (token === void 0) {
-    throw new SessionError(
-      'the session token is missing. Stop the stale session with `bv session stop` and start a new one.',
-    );
-  }
-  const baseUrl = daemonBaseUrl(info);
-  return createClient(baseUrl, token, info.port);
-}
-function createClient(baseUrl, token, port) {
-  const call = async (method, params = {}, options = {}) => {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response;
-    try {
-      response = await fetch(`${baseUrl}/rpc`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ method, params }),
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new SessionError(`could not reach the session daemon: ${message}`);
-    } finally {
-      clearTimeout(timer);
-    }
-    let body;
-    try {
-      body = await response.json();
-    } catch {
-      throw new SessionError(
-        `the session daemon returned a non-JSON response (${response.status})`,
-      );
-    }
-    if (!body.ok) {
-      const err = new Error(body.error ?? 'the session daemon reported an unknown error');
-      Object.assign(err, { reasons: body.reasons ?? [], exitCode: body.exitCode });
-      throw err;
-    }
-    return body.data;
-  };
-  const health = async () => {
-    try {
-      const response = await fetch(`${baseUrl}/health`, {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
-  };
-  return { port, call, health };
-}
-
-// src/cli/commands/session.ts
+init_client();
 init_daemon_info();
 init_paths();
+init_errors();
 function daemonEntry() {
   const here = dirname3(fileURLToPath3(import.meta.url));
   const sourceEntry = resolve4(here, '..', '..', 'core', 'daemon-entry.ts');
@@ -4640,9 +6522,18 @@ function daemonEntry() {
     }
     return { command: 'tsx', args: [sourceEntry] };
   }
-  const bundle = resolve4(here, '..', '..', '..', 'scripts', 'bv.mjs');
-  if (existsSync3(bundle)) {
-    return { command: process.execPath, args: [bundle] };
+  const self = fileURLToPath3(import.meta.url);
+  if (existsSync3(self) && self.endsWith('.mjs')) {
+    return { command: process.execPath, args: [self] };
+  }
+  for (const candidate of [
+    resolve4(here, '..', '..', '..', 'scripts', 'bv.mjs'),
+    resolve4(here, '..', '..', 'scripts', 'bv.mjs'),
+    resolve4(here, '..', 'scripts', 'bv.mjs'),
+  ]) {
+    if (existsSync3(candidate)) {
+      return { command: process.execPath, args: [candidate] };
+    }
   }
   throw new UsageError(
     'could not locate the session daemon entry point. Reinstall browser-verified or run from the repository.',
@@ -4826,7 +6717,9 @@ function registerSession(program) {
 
 // src/cli/commands/perception.ts
 init_exit();
+init_client();
 init_locate();
+init_errors();
 var ACTION_KINDS = [
   'click',
   'dblclick',
@@ -5025,6 +6918,8 @@ function describeTarget(descriptor) {
 // src/cli/commands/safety.ts
 import { readFile as readFile5 } from 'fs/promises';
 init_exit();
+init_client();
+init_errors();
 init_paths();
 init_planlock();
 
@@ -5429,6 +7324,1502 @@ async function readSecretFromStdin(name) {
   }
 }
 
+// src/cli/commands/proof.ts
+import { readFile as readFile7, writeFile as writeFile7, mkdir as mkdir6 } from 'fs/promises';
+import { dirname as dirname7 } from 'path';
+init_exit();
+init_client();
+init_errors();
+init_paths();
+init_planlock();
+
+// src/memory/playbooks.ts
+init_paths();
+import Database from 'better-sqlite3';
+import { mkdirSync } from 'fs';
+import { dirname as dirname6 } from 'path';
+var DEFAULT_TTL_DAYS = 30;
+var Playbooks = class {
+  constructor(cwd = process.cwd(), options = {}) {
+    this.cwd = cwd;
+    this.options = options;
+  }
+  cwd;
+  options;
+  db;
+  /** Open the database and make sure the schema exists. */
+  open() {
+    if (this.db !== void 0) return this.db;
+    const path = playbooksPath(this.cwd);
+    mkdirSync(dirname6(path), { recursive: true });
+    const db = new Database(path);
+    db.pragma('journal_mode = WAL');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS playbooks (
+        origin          TEXT NOT NULL,
+        key             TEXT NOT NULL,
+        value           TEXT NOT NULL,
+        confidence      REAL NOT NULL DEFAULT 1.0,
+        last_verified_at TEXT NOT NULL,
+        expires_at      TEXT NOT NULL,
+        PRIMARY KEY (origin, key)
+      );
+      CREATE INDEX IF NOT EXISTS playbooks_expiry ON playbooks (expires_at);
+    `);
+    this.db = db;
+    return db;
+  }
+  /** Close the database. */
+  close() {
+    this.db?.close();
+    this.db = void 0;
+  }
+  /**
+   * Remember something.
+   *
+   * Storing an existing key refreshes it and raises its confidence.
+   */
+  remember(origin, key, value) {
+    const db = this.open();
+    const now = /* @__PURE__ */ new Date();
+    const ttlDays = this.options.ttlDays ?? DEFAULT_TTL_DAYS;
+    const expiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1e3);
+    const existing = db
+      .prepare('SELECT confidence FROM playbooks WHERE origin = ? AND key = ?')
+      .get(origin, key);
+    const confidence = Math.min(1, (existing?.confidence ?? 0.5) + 0.1);
+    db.prepare(
+      `INSERT INTO playbooks (origin, key, value, confidence, last_verified_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(origin, key) DO UPDATE SET
+         value = excluded.value,
+         confidence = excluded.confidence,
+         last_verified_at = excluded.last_verified_at,
+         expires_at = excluded.expires_at`,
+    ).run(origin, key, value, confidence, now.toISOString(), expiresAt.toISOString());
+    return {
+      origin,
+      key,
+      value,
+      confidence,
+      lastVerifiedAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+  /**
+   * Look something up.
+   *
+   * An expired entry is not returned, and is deleted as it is found.
+   */
+  recall(origin, key) {
+    const db = this.open();
+    const row = db.prepare('SELECT * FROM playbooks WHERE origin = ? AND key = ?').get(origin, key);
+    if (row === void 0) return void 0;
+    if (Date.parse(row.expires_at) <= Date.now()) {
+      this.forget(origin, key);
+      return void 0;
+    }
+    return {
+      origin: row.origin,
+      key: row.key,
+      value: row.value,
+      confidence: row.confidence,
+      lastVerifiedAt: row.last_verified_at,
+      expiresAt: row.expires_at,
+    };
+  }
+  /**
+   * Record that something stopped working.
+   *
+   * The confidence drops. An entry that has lost all confidence is
+   * forgotten, so a broken selector is not carried forward.
+   */
+  recordFailure(origin, key) {
+    const db = this.open();
+    const entry = this.recall(origin, key);
+    if (entry === void 0) return void 0;
+    const confidence = entry.confidence - 0.25;
+    if (confidence <= 0) {
+      this.forget(origin, key);
+      return void 0;
+    }
+    db.prepare('UPDATE playbooks SET confidence = ? WHERE origin = ? AND key = ?').run(
+      confidence,
+      origin,
+      key,
+    );
+    return { ...entry, confidence };
+  }
+  /** Forget one entry. */
+  forget(origin, key) {
+    const db = this.open();
+    const result = db
+      .prepare('DELETE FROM playbooks WHERE origin = ? AND key = ?')
+      .run(origin, key);
+    return result.changes > 0;
+  }
+  /** Every entry for an origin. */
+  list(origin) {
+    const db = this.open();
+    const rows =
+      origin === void 0
+        ? db.prepare('SELECT * FROM playbooks ORDER BY origin, key').all()
+        : db.prepare('SELECT * FROM playbooks WHERE origin = ? ORDER BY key').all(origin);
+    return rows.map((row) => ({
+      origin: row.origin,
+      key: row.key,
+      value: row.value,
+      confidence: row.confidence,
+      lastVerifiedAt: row.last_verified_at,
+      expiresAt: row.expires_at,
+    }));
+  }
+  /** Remove every expired entry. */
+  prune() {
+    const db = this.open();
+    const result = db
+      .prepare('DELETE FROM playbooks WHERE expires_at <= ?')
+      .run(/* @__PURE__ */ new Date().toISOString());
+    return result.changes;
+  }
+  /** How many entries are stored. */
+  count() {
+    const db = this.open();
+    const row = db.prepare('SELECT COUNT(*) AS n FROM playbooks').get();
+    return row.n;
+  }
+  /** Remove every entry. */
+  clear() {
+    this.open().exec('DELETE FROM playbooks');
+  }
+};
+function renderPlaybooks(entries) {
+  if (entries.length === 0) return '(the playbook is empty)';
+  const lines = [];
+  for (const entry of entries) {
+    lines.push(
+      `${entry.origin}  ${entry.key} = ${entry.value}  (confidence ${entry.confidence.toFixed(2)}, expires ${entry.expiresAt.slice(0, 10)})`,
+    );
+  }
+  return lines.join('\n');
+}
+
+// src/compile/compiler.ts
+init_ir();
+function compileFlow(run2, name = 'flow') {
+  const variables = findVariables(run2);
+  const steps = applyVariables(run2.steps, variables);
+  return {
+    name,
+    steps,
+    variables,
+    ...(run2.goal !== void 0 ? { goal: run2.goal } : {}),
+  };
+}
+function renderScript(flow) {
+  const lines = [];
+  lines.push('// Generated by browser-verified. Compiled from a recorded run.');
+  if (flow.goal !== void 0) {
+    lines.push(`// Goal: ${flow.goal}`);
+  }
+  lines.push('//');
+  lines.push('// This script is plain Playwright: it needs no browser-verified code.');
+  lines.push('// Review it, put it in version control, and run it in CI.');
+  lines.push('');
+  lines.push("import { test, expect, type Page, type Locator } from '@playwright/test';");
+  lines.push('');
+  if (flow.variables.length > 0) {
+    lines.push('/** The parameters this flow takes. */');
+    lines.push('interface FlowVars {');
+    for (const variable of flow.variables) {
+      lines.push(`  /** Default: ${JSON.stringify(variable.defaultValue)} */`);
+      lines.push(`  ${variable.name}: string;`);
+    }
+    lines.push('}');
+    lines.push('');
+  }
+  lines.push('/** Find an element, trying the recorded locators in order. */');
+  lines.push('async function findElement(page: Page, selectors: string[]): Promise<Locator> {');
+  lines.push('  for (const selector of selectors) {');
+  lines.push('    try {');
+  lines.push('      const locator = resolve(page, selector);');
+  lines.push('      if (await locator.count() > 0) return locator.first();');
+  lines.push('    } catch {');
+  lines.push('      // This selector does not apply here; try the next one.');
+  lines.push('    }');
+  lines.push('  }');
+  lines.push('  throw new Error(`no element matched any of: ${selectors.join(", ")}`);');
+  lines.push('}');
+  lines.push('');
+  lines.push('/** Resolve one recorded selector. */');
+  lines.push('function resolve(page: Page, selector: string): Locator {');
+  lines.push("  if (selector.startsWith('role=')) {");
+  lines.push('    const match = /^role=(\\S+)(?: name="(.*)")?$/.exec(selector);');
+  lines.push('    if (match === null) throw new Error(`bad selector: ${selector}`);');
+  lines.push('    const [, role, name] = match;');
+  lines.push(
+    '    return page.getByRole(role as Parameters<Page["getByRole"]>[0], name !== undefined ? { name } : {});',
+  );
+  lines.push('  }');
+  lines.push("  if (selector.startsWith('label=')) {");
+  lines.push('    return page.getByLabel(selector.slice(6).replace(/^"|"$/g, ""));');
+  lines.push('  }');
+  lines.push("  if (selector.startsWith('text=')) {");
+  lines.push('    return page.getByText(selector.slice(5).replace(/^"|"$/g, ""));');
+  lines.push('  }');
+  lines.push("  if (selector.startsWith('testid=')) {");
+  lines.push('    return page.getByTestId(selector.slice(8));');
+  lines.push('  }');
+  lines.push('  return page.locator(selector);');
+  lines.push('}');
+  lines.push('');
+  lines.push("test('" + escapeSingle(flow.name) + "', async ({ page }) => {");
+  if (flow.variables.length > 0) {
+    lines.push('  const vars: FlowVars = {');
+    for (const variable of flow.variables) {
+      lines.push(
+        `    ${variable.name}: process.env.${variable.name.toUpperCase()} ?? ${JSON.stringify(variable.defaultValue)},`,
+      );
+    }
+    lines.push('  };');
+    lines.push('');
+  }
+  for (const step of flow.steps) {
+    lines.push(...renderStep(step, flow));
+  }
+  lines.push('});');
+  lines.push('');
+  return lines.join('\n');
+}
+function renderStep(step, flow) {
+  const lines = [];
+  const selectors = step.locators.map((candidate) => candidate.value);
+  lines.push(`  // Step ${step.index}: ${step.kind}`);
+  if (selectors.length > 1) {
+    lines.push(`  // Fallback locators, in the order they were tried:`);
+    for (const candidate of step.locators.slice(1)) {
+      lines.push(`  //   ${candidate.value}`);
+    }
+  }
+  switch (step.kind) {
+    case 'goto':
+      lines.push(`  await page.goto(${JSON.stringify(step.params.value ?? step.pre.url)});`);
+      break;
+    case 'click':
+    case 'dblclick':
+    case 'hover': {
+      const method = step.kind === 'dblclick' ? 'dblclick' : step.kind;
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(`  await target${step.index}.${method}();`);
+      break;
+    }
+    case 'fill':
+    case 'type': {
+      const value = renderValue(step.params.value, flow);
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(`  await target${step.index}.fill(${value});`);
+      break;
+    }
+    case 'select': {
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(
+        `  await target${step.index}.selectOption(${JSON.stringify(step.params.option ?? '')});`,
+      );
+      break;
+    }
+    case 'check':
+    case 'uncheck': {
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(`  await target${step.index}.${step.kind}();`);
+      break;
+    }
+    case 'press': {
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(
+        `  await target${step.index}.press(${JSON.stringify(step.params.key ?? 'Enter')});`,
+      );
+      break;
+    }
+    case 'upload': {
+      lines.push(
+        `  const target${step.index} = await findElement(page, ${JSON.stringify(selectors)});`,
+      );
+      lines.push(
+        `  await target${step.index}.setInputFiles(${JSON.stringify(step.params.file ?? '')});`,
+      );
+      break;
+    }
+    case 'scroll': {
+      lines.push(`  await page.mouse.wheel(0, ${step.params.amount ?? 0});`);
+      break;
+    }
+    case 'wait': {
+      lines.push(
+        `  await target${step.index}.waitFor({ state: '${step.params.condition ?? 'visible'}' });`,
+      );
+      break;
+    }
+    default:
+      break;
+  }
+  for (const assertion of step.assertions) {
+    lines.push(...renderAssertion(assertion, step));
+  }
+  lines.push('');
+  return lines;
+}
+function renderAssertion(assertion, step) {
+  switch (assertion.kind) {
+    case 'url_changed':
+      return [`  await expect(page).toHaveURL(${JSON.stringify(assertion.value ?? '')});`];
+    case 'text_added':
+      return [
+        `  await expect(page.getByText(${JSON.stringify(assertion.value ?? '')})).toBeVisible();`,
+      ];
+    case 'count_changed':
+      return [
+        `  await expect(page.locator(${JSON.stringify(step.locators[0]?.value ?? '')})).toHaveCount(${assertion.count ?? 0});`,
+      ];
+    case 'dialog_appeared':
+      return [`  // A ${assertion.value ?? 'dialog'} dialog was expected here.`];
+    case 'popup_appeared':
+      return [`  // A popup was expected at ${assertion.value ?? '?'}.`];
+    default:
+      return [];
+  }
+}
+function renderValue(value, flow) {
+  if (value === void 0) return "''";
+  const match = /^\{\{(\w+)\}\}$/.exec(value);
+  if (match !== null) {
+    const name = match[1] ?? '';
+    const variable = flow.variables.find((v) => v.name === name);
+    if (variable !== void 0) return `vars.${variable.name}`;
+  }
+  return JSON.stringify(value);
+}
+function escapeSingle(value) {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// src/cli/commands/proof.ts
+init_replay();
+init_heal();
+init_store();
+function registerProof(program) {
+  program
+    .command('verify')
+    .description('check the success condition against the live page')
+    .option('--condition <file>', 'the condition JSON file')
+    .option('--run <runId>', 'the run to write the evidence to')
+    .action(async (options, cmd) => {
+      const global = globalOptions(cmd);
+      if (options.condition === void 0) {
+        const message = 'bv verify needs --condition <file>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      try {
+        const raw = await readFile7(absPath(options.condition, global.cwd), 'utf8');
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new UsageError(`the condition file is not valid JSON: ${message}`);
+        }
+        const result = ConditionSchema.safeParse(parsed);
+        if (!result.success) {
+          const issues = result.error.issues
+            .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+            .join('; ');
+          throw new UsageError(`the condition is not valid: ${issues}`);
+        }
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call('verify', {
+          condition: result.data,
+          ...(options.run !== void 0 ? { runId: options.run } : {}),
+        });
+        const lines = [
+          payload.summary,
+          ...payload.results.map((r) => `  ${r.passed ? 'pass' : 'FAIL'}  ${r.reason}`),
+        ];
+        emit(
+          cmd,
+          payload.passed ? ok(payload, lines) : fail(payload, lines, EXIT.VERIFICATION_FAILED),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('extract')
+    .description('extract values from the page, each with its evidence')
+    .option('--schema <file>', 'the JSON Schema file')
+    .option('--out <file>', 'write the result to this file')
+    .option('--format <format>', 'json, csv or md', 'json')
+    .action(async (options, cmd) => {
+      const global = globalOptions(cmd);
+      if (options.schema === void 0) {
+        const message = 'bv extract needs --schema <file>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      const format = options.format ?? 'json';
+      if (!['json', 'csv', 'md'].includes(format)) {
+        const message = `--format must be json, csv or md, not "${format}"`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      try {
+        const raw = await readFile7(absPath(options.schema, global.cwd), 'utf8');
+        let schema;
+        try {
+          schema = JSON.parse(raw);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new UsageError(`the schema file is not valid JSON: ${message}`);
+        }
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call('extract', { schema });
+        const text = renderExtract(payload, format);
+        if (options.out !== void 0) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir6(dirname7(path), { recursive: true });
+          await writeFile7(path, text, 'utf8');
+          emit(cmd, ok(payload, [`written to ${options.out}`]));
+          return;
+        }
+        emit(cmd, ok(payload, [text]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('rewind')
+    .description('rewind the browser to an earlier step and continue in a branch run')
+    .option('--to <n>', 'the step to rewind to')
+    .option('--run <runId>', 'the run the step belongs to')
+    .action(async (options, cmd) => {
+      const global = globalOptions(cmd);
+      if (options.to === void 0) {
+        const message = 'bv rewind needs --to <n>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      const to = Number(options.to);
+      if (!Number.isInteger(to) || to < 1) {
+        const message = `--to must be a step number, not "${options.to}"`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      try {
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call('rewind', {
+          to,
+          ...(options.run !== void 0 ? { runId: options.run } : {}),
+        });
+        const lines = [
+          `rewound to step ${payload.toStep} in branch run ${payload.branchRunId}`,
+          `url: ${payload.url}`,
+          `storage state restored: ${payload.storageRestored ? 'yes' : 'no'}`,
+          '',
+          "A rewind restores the browser's place, not the moment. Not restored:",
+          ...payload.notRestored.map((item) => `  - ${item}`),
+        ];
+        emit(cmd, ok(payload, lines));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('compile')
+    .description('compile a recorded run into a plain Playwright script')
+    .argument('<runId>', 'the run to compile')
+    .option('--out <file>', 'the file to write (default flows/<runId>.spec.ts)')
+    .action(async (runId, options, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const run2 = await readRun(runId, global.cwd);
+        const flow = compileFlow(run2, runId);
+        const script = renderScript(flow);
+        const out = options.out ?? `flows/${runId}.spec.ts`;
+        const path = absPath(out, global.cwd);
+        await mkdir6(dirname7(path), { recursive: true });
+        await writeFile7(path, script, 'utf8');
+        const lines = [
+          `compiled ${run2.steps.length} step(s) into ${out}`,
+          ...(flow.variables.length > 0
+            ? [`variables: ${flow.variables.map((v) => v.name).join(', ')}`]
+            : []),
+        ];
+        emit(cmd, ok({ runId, out, steps: run2.steps.length }, lines));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('replay')
+    .description('replay a recorded run deterministically, with no LLM cost')
+    .argument('<runId>', 'the run to replay')
+    .option('--var <k=v>', 'a variable value (repeatable)', collect)
+    .option('--heal', 'repair a step whose locator broke', false)
+    .action(async (runId, options, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        await readRun(runId, global.cwd);
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call('replay', {
+          runId,
+          variables: parseVariables(options.var ?? []),
+          heal: options.heal === true,
+        });
+        const lines = [payload.summary];
+        for (const entry of payload.drift) {
+          lines.push(
+            `  Step ${entry.stepIndex}: ${entry.from} \u2192 ${entry.to} (${entry.unchanged})`,
+          );
+        }
+        emit(cmd, payload.ok ? ok(payload, lines) : fail(payload, lines, EXIT.VERIFICATION_FAILED));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('drift')
+    .description('list the locator changes recorded for a flow')
+    .argument('<runId>', 'the run to inspect')
+    .action(async (runId, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const drift = await readDrift(runId, global.cwd);
+        const log = new DriftLog();
+        for (const entry of drift) log.add(entry);
+        emit(cmd, ok({ entries: drift }, [log.render()]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('mcp')
+    .description('serve the browser tools over the Model Context Protocol (stdio)')
+    .action(async (cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const { createMcpServer: createMcpServer2 } = await Promise.resolve().then(
+          () => (init_wiring(), wiring_exports),
+        );
+        const server = await createMcpServer2({ cwd: global.cwd });
+        process.stderr.write('browser-verified MCP server ready on stdio\n');
+        await server.serve(process.stdin, process.stdout);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  const memory = program.command('memory').description('manage the site memory');
+  memory
+    .command('ls')
+    .description('list the remembered facts')
+    .option('--origin <origin>', 'only this origin')
+    .action((options, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const playbooks = new Playbooks(global.cwd);
+        const entries = playbooks.list(options.origin);
+        playbooks.close();
+        emit(cmd, ok({ entries }, [renderPlaybooks(entries)]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  memory
+    .command('rm')
+    .description('forget a fact')
+    .argument('<origin>', 'the origin')
+    .argument('<key>', 'the key')
+    .action((origin, key, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const playbooks = new Playbooks(global.cwd);
+        const removed = playbooks.forget(origin, key);
+        playbooks.close();
+        emit(
+          cmd,
+          removed
+            ? ok({ origin, key }, [`forgot ${origin} ${key}`])
+            : fail({ error: 'not found' }, [`no entry for ${origin} ${key}`], EXIT.FAILURE),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  memory
+    .command('prune')
+    .description('remove the expired facts')
+    .action((cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const playbooks = new Playbooks(global.cwd);
+        const pruned = playbooks.prune();
+        playbooks.close();
+        emit(cmd, ok({ pruned }, [`removed ${pruned} expired entr${pruned === 1 ? 'y' : 'ies'}`]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+}
+function collect(value, previous) {
+  return [...previous, value];
+}
+function renderExtract(payload, format) {
+  if (format === 'json') return JSON.stringify(payload, null, 2);
+  if (format === 'csv') {
+    const lines2 = ['field,value,source,verified'];
+    for (const name of payload.order) {
+      const field = payload.fields[name];
+      if (field === void 0) continue;
+      lines2.push(
+        [
+          csvEscape(name),
+          csvEscape(field.value === null ? '' : asText(field.value)),
+          csvEscape(field.evidence.url),
+          field.evidence.verified ? 'yes' : 'no',
+        ].join(','),
+      );
+    }
+    return lines2.join('\n');
+  }
+  const lines = ['| Field | Value | Source | Verified |', '| --- | --- | --- | --- |'];
+  for (const name of payload.order) {
+    const field = payload.fields[name];
+    if (field === void 0) continue;
+    lines.push(
+      `| ${name} | ${field.value === null ? '\u2014' : asText(field.value)} | ${field.evidence.url} | ${field.evidence.verified ? 'yes' : 'no'} |`,
+    );
+  }
+  return lines.join('\n');
+}
+function asText(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null) return 'null';
+  if (value === void 0) return 'undefined';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '(unserialisable)';
+  }
+}
+function csvEscape(value) {
+  if (!/[",\n]/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+async function readDrift(runId, cwd) {
+  const run2 = await readRun(runId, cwd);
+  const recorded = run2.drift;
+  if (Array.isArray(recorded)) {
+    return recorded;
+  }
+  return [];
+}
+
+// src/cli/commands/qa.ts
+import { writeFile as writeFile8, mkdir as mkdir7, readFile as readFile8 } from 'fs/promises';
+import { dirname as dirname8 } from 'path';
+init_exit();
+init_client();
+init_errors();
+init_paths();
+init_browser();
+
+// src/testing/diff.ts
+function nodeKey(node) {
+  return `${node.role}::${node.name}`;
+}
+async function diffPages(browser, urlA, urlB) {
+  const context = await browser.newContext();
+  const pageA = await context.newPage();
+  const pageB = await context.newPage();
+  try {
+    await pageA.goto(urlA, { waitUntil: 'domcontentloaded' });
+    await pageB.goto(urlB, { waitUntil: 'domcontentloaded' });
+    const [treeA, treeB] = await Promise.all([readTree(pageA), readTree(pageB)]);
+    const keysA = new Set(treeA.map(nodeKey));
+    const keysB = new Set(treeB.map(nodeKey));
+    const onlyInA = [];
+    const onlyInB = [];
+    for (const node of treeA) {
+      if (!keysB.has(nodeKey(node))) {
+        onlyInA.push({ role: node.role, name: node.name, onlyIn: 'a' });
+      }
+    }
+    for (const node of treeB) {
+      if (!keysA.has(nodeKey(node))) {
+        onlyInB.push({ role: node.role, name: node.name, onlyIn: 'b' });
+      }
+    }
+    const namesByRoleA = /* @__PURE__ */ new Map();
+    const namesByRoleB = /* @__PURE__ */ new Map();
+    for (const node of treeA) {
+      namesByRoleA.set(node.role, [...(namesByRoleA.get(node.role) ?? []), node.name]);
+    }
+    for (const node of treeB) {
+      namesByRoleB.set(node.role, [...(namesByRoleB.get(node.role) ?? []), node.name]);
+    }
+    const changed = [];
+    for (const [role, namesA] of namesByRoleA) {
+      const namesB = namesByRoleB.get(role);
+      if (namesB === void 0) continue;
+      for (const nameA of namesA) {
+        if (namesB.includes(nameA)) continue;
+        const nameB = namesB[0] ?? '';
+        changed.push({ role, nameA, nameB });
+        break;
+      }
+    }
+    return {
+      urlA,
+      urlB,
+      onlyInA,
+      onlyInB,
+      changed,
+      nodeCounts: { a: treeA.length, b: treeB.length },
+      identical: onlyInA.length === 0 && onlyInB.length === 0 && changed.length === 0,
+    };
+  } finally {
+    await context.close();
+  }
+}
+async function readTree(page) {
+  const nodes = await page.evaluate(collectTree);
+  return nodes.map((node) => ({ role: node.role, name: node.name }));
+}
+function collectTree() {
+  const collected = [];
+  for (const element of Array.from(document.querySelectorAll('*'))) {
+    let role = element.getAttribute('role') ?? '';
+    if (role.length === 0) {
+      const tag = element.tagName.toLowerCase();
+      if (tag === 'a') role = 'link';
+      else if (tag === 'button') role = 'button';
+      else if (tag === 'input') {
+        const type = element.type;
+        if (type === 'submit') role = 'button';
+        else if (type === 'checkbox') role = 'checkbox';
+        else if (type === 'radio') role = 'radio';
+        else role = 'textbox';
+      } else if (tag === 'textarea') role = 'textbox';
+      else if (tag === 'select') role = 'combobox';
+      else if (/^h[1-6]$/.test(tag)) role = 'heading';
+      else if (tag === 'img') role = 'img';
+      else if (tag === 'ul' || tag === 'ol') role = 'list';
+      else if (tag === 'li') role = 'listitem';
+      else if (tag === 'form') role = 'form';
+      else if (tag === 'nav') role = 'navigation';
+      else if (tag === 'main') role = 'main';
+      else if (tag === 'footer') role = 'contentinfo';
+      else if (tag === 'header') role = 'banner';
+      else if (tag === 'table') role = 'table';
+      else if (tag === 'p') role = 'paragraph';
+      else role = 'generic';
+    }
+    let name = element.getAttribute('aria-label') ?? '';
+    if (name.trim().length === 0) name = element.getAttribute('title') ?? '';
+    if (name.trim().length === 0) {
+      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+      if (text.length > 0 && text.length <= 120) name = text;
+    }
+    if (name.trim().length === 0 && element instanceof HTMLInputElement) {
+      name = element.value;
+    }
+    if (role === 'generic') continue;
+    if (name.trim().length === 0) continue;
+    collected.push({ role, name: name.trim() });
+  }
+  return collected;
+}
+function renderDiff(result) {
+  const lines = [];
+  if (result.identical) {
+    lines.push('The two pages have the same accessibility tree.');
+    return lines.join('\n');
+  }
+  lines.push(
+    `A: ${result.urlA} (${result.nodeCounts.a} nodes)
+B: ${result.urlB} (${result.nodeCounts.b} nodes)`,
+  );
+  if (result.onlyInA.length > 0) {
+    lines.push(`
+Only in A (${result.onlyInA.length}):`);
+    for (const difference of result.onlyInA.slice(0, 30)) {
+      lines.push(`  ${difference.role} "${difference.name}"`);
+    }
+    if (result.onlyInA.length > 30) {
+      lines.push(`  ... and ${result.onlyInA.length - 30} more`);
+    }
+  }
+  if (result.onlyInB.length > 0) {
+    lines.push(`
+Only in B (${result.onlyInB.length}):`);
+    for (const difference of result.onlyInB.slice(0, 30)) {
+      lines.push(`  ${difference.role} "${difference.name}"`);
+    }
+    if (result.onlyInB.length > 30) {
+      lines.push(`  ... and ${result.onlyInB.length - 30} more`);
+    }
+  }
+  if (result.changed.length > 0) {
+    lines.push(`
+Changed (${result.changed.length}):`);
+    for (const change of result.changed.slice(0, 30)) {
+      lines.push(`  ${change.role}: "${change.nameA}" \u2192 "${change.nameB}"`);
+    }
+  }
+  return lines.join('\n');
+}
+
+// src/testing/qa.ts
+import { createHash as createHash2 } from 'crypto';
+function errorCount(findings) {
+  return (
+    findings.console.filter((message) => message.type === 'error').length +
+    findings.pageErrors.length +
+    findings.networkFailures.length
+  );
+}
+function renderFindings(findings) {
+  const lines = [];
+  const errors = errorCount(findings);
+  lines.push(`${findings.url}: ${errors} error(s)`);
+  if (findings.pageErrors.length > 0) {
+    lines.push(`  uncaught errors:`);
+    for (const error of findings.pageErrors) lines.push(`    ${error}`);
+  }
+  const consoleErrors = findings.console.filter((message) => message.type === 'error');
+  if (consoleErrors.length > 0) {
+    lines.push(`  console errors:`);
+    for (const message of consoleErrors) lines.push(`    ${message.text}`);
+  }
+  if (findings.networkFailures.length > 0) {
+    lines.push(`  failed requests:`);
+    for (const failure of findings.networkFailures) {
+      lines.push(`    ${failure.method} ${failure.url} \u2014 ${failure.error}`);
+    }
+  }
+  const warnings = findings.console.filter((message) => message.type === 'warning');
+  if (warnings.length > 0) {
+    lines.push(`  ${warnings.length} warning(s)`);
+  }
+  return lines.join('\n');
+}
+
+// src/testing/report.ts
+function buildReports(findings, options = {}) {
+  const reports = [];
+  const repro = options.reproSteps ?? ['navigate to the url', 'observe the page'];
+  for (const error of findings.pageErrors) {
+    reports.push({
+      id: '',
+      kind: 'page-error',
+      summary: `uncaught error: ${firstLine(error)}`,
+      url: findings.url,
+      detail: error,
+      severity: 'critical',
+      reproduce: [...repro],
+    });
+  }
+  for (const message of findings.console.filter((entry) => entry.type === 'error')) {
+    reports.push({
+      id: '',
+      kind: 'console-error',
+      summary: `console error: ${firstLine(message.text)}`,
+      url: findings.url,
+      detail:
+        message.location !== void 0
+          ? `${message.text}
+  at ${message.location.url}:${message.location.line}:${message.location.column}`
+          : message.text,
+      severity: 'major',
+      reproduce: [...repro],
+    });
+  }
+  for (const failure of findings.networkFailures) {
+    reports.push({
+      id: '',
+      kind: 'network-failure',
+      summary: `request failed: ${failure.method} ${failure.url}`,
+      url: findings.url,
+      detail: `${failure.error} (${failure.resourceType})`,
+      severity: 'major',
+      reproduce: [...repro],
+    });
+  }
+  if (options.viewport !== void 0 && options.viewport.horizontalOverflow > 0) {
+    reports.push({
+      id: '',
+      kind: 'overflow',
+      summary: `${options.viewport.horizontalOverflow} element(s) overflow the ${options.viewport.width}px viewport`,
+      url: findings.url,
+      detail: options.viewport.overflowSelector ?? '(the overflowing element was not identified)',
+      severity: 'minor',
+      reproduce: [...repro, `resize to ${options.viewport.width}x${options.viewport.height}`],
+    });
+  }
+  return reports.map((report) => ({
+    ...report,
+    id: `bug-${hash(`${report.kind}|${report.url}|${report.detail}`).slice(0, 8)}`,
+  }));
+}
+function renderReports(reports) {
+  if (reports.length === 0) {
+    return '# No problems found\n\nThe run found nothing to report.';
+  }
+  const lines = [];
+  lines.push('# Problems found');
+  lines.push('');
+  lines.push(`${reports.length} problem(s).`);
+  lines.push('');
+  const bySeverity = [...reports].sort(
+    (a, b) => severityRank(a.severity) - severityRank(b.severity),
+  );
+  for (const report of bySeverity) {
+    lines.push(`## ${report.summary}`);
+    lines.push('');
+    lines.push(`- **id**: ${report.id}`);
+    lines.push(`- **kind**: ${report.kind}`);
+    lines.push(`- **severity**: ${report.severity}`);
+    lines.push(`- **url**: ${report.url}`);
+    lines.push('');
+    lines.push('### Detail');
+    lines.push('');
+    lines.push('```');
+    lines.push(report.detail);
+    lines.push('```');
+    lines.push('');
+    lines.push('### How to reproduce');
+    lines.push('');
+    for (const step of report.reproduce) lines.push(`1. ${step}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+function renderReportsJson(reports) {
+  return JSON.stringify({ reports, count: reports.length }, null, 2);
+}
+function renderFullReport(findings, reports) {
+  return `${renderFindings(findings)}
+
+---
+
+${renderReports(reports)}`;
+}
+function severityRank(severity) {
+  switch (severity) {
+    case 'critical':
+      return 0;
+    case 'major':
+      return 1;
+    case 'minor':
+      return 2;
+    default:
+      return 3;
+  }
+}
+function firstLine(text) {
+  const index = text.indexOf('\n');
+  const line = index === -1 ? text : text.slice(0, index);
+  return line.length > 120 ? `${line.slice(0, 117)}\u2026` : line;
+}
+function hash(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) {
+    h = (h << 5) - h + text.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h).toString(16).padStart(8, '0');
+}
+
+// src/testing/discover.ts
+function discoverEndpoints(facts) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const fact of facts) {
+    let url;
+    try {
+      url = new URL(fact.url);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+    const key = `${fact.method} ${url.pathname}`;
+    const existing = byKey.get(key);
+    if (existing === void 0) {
+      byKey.set(key, {
+        method: fact.method,
+        path: url.pathname,
+        url: `${url.origin}${url.pathname}`,
+        origin: url.origin,
+        calls: 1,
+        statuses: [fact.status],
+        contentTypes: [],
+        isApi: isApiPath(url.pathname),
+      });
+      continue;
+    }
+    existing.calls += 1;
+    if (!existing.statuses.includes(fact.status)) existing.statuses.push(fact.status);
+  }
+  return [...byKey.values()].sort((a, b) => b.calls - a.calls || a.path.localeCompare(b.path));
+}
+function isApiPath(path) {
+  if (path === '/' || path === '') return false;
+  if (/^\/(api|graphql|rpc|rest|v\d+)\//i.test(path)) return true;
+  if (/\.(json|xml)$/i.test(path)) return true;
+  if (/^\/[a-z0-9-_]+(\/[a-z0-9-_]+)*$/i.test(path) && path.split('/').length >= 3) {
+    return true;
+  }
+  return false;
+}
+function renderEndpoints(endpoints) {
+  if (endpoints.length === 0) {
+    return 'No network endpoints were observed.';
+  }
+  const apiCount = endpoints.filter((endpoint) => endpoint.isApi).length;
+  const lines = [];
+  lines.push(
+    `${endpoints.length} endpoint(s) observed, ${apiCount} of which look like APIs. Only endpoints this run actually used are listed.`,
+  );
+  lines.push('');
+  for (const endpoint of endpoints) {
+    const statuses = endpoint.statuses.join(', ');
+    lines.push(
+      `  ${endpoint.method.padEnd(6)} ${endpoint.path}${endpoint.isApi ? '  [api]' : ''}  ${endpoint.calls} call(s)  ${statuses}`,
+    );
+  }
+  return lines.join('\n');
+}
+function asOpenApiFragment(endpoints) {
+  const paths = {};
+  for (const endpoint of endpoints) {
+    if (!endpoint.isApi) continue;
+    const existing = paths[endpoint.path] ?? {};
+    existing[endpoint.method.toLowerCase()] = {
+      summary: `Observed ${endpoint.calls} time(s); status ${endpoint.statuses.join(', ')}.`,
+      responses: Object.fromEntries(
+        endpoint.statuses.map((status) => [
+          String(status),
+          { description: 'Observed. The response shape was not recorded.' },
+        ]),
+      ),
+    };
+    paths[endpoint.path] = existing;
+  }
+  return {
+    openapi: '3.0.3',
+    info: {
+      title: 'Observed endpoints',
+      version: '0.0.0',
+      description:
+        'This fragment was generated from what a browser run actually did. It is not a specification of the API: undocumented endpoints are absent, and the response shapes are not described.',
+    },
+    paths,
+  };
+}
+
+// src/testing/research.ts
+var MAX_EXTRACT_CHARS = 4e4;
+async function extractText(page) {
+  const text = await page
+    .evaluate(() => {
+      const clone = document.body.cloneNode(true);
+      for (const element of Array.from(clone.querySelectorAll('script, style, noscript'))) {
+        element.remove();
+      }
+      return (clone.innerText ?? clone.textContent ?? '').replace(/\n{3,}/g, '\n\n');
+    })
+    .catch(() => '');
+  return text.slice(0, MAX_EXTRACT_CHARS);
+}
+function bestSentence(text, question) {
+  const questionWords = new Set(
+    question
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 2),
+  );
+  const sentences = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 20 && sentence.length < 600);
+  let best = { sentence: '', score: 0 };
+  for (const sentence of sentences) {
+    const words = sentence.toLowerCase().split(/[^a-z0-9]+/);
+    let score = 0;
+    for (const word of words) {
+      if (questionWords.has(word)) score += 1;
+    }
+    if (score > best.score) best = { sentence, score };
+  }
+  return best;
+}
+async function research(browser, questions, sources) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const sourcesRead = [];
+  const sourcesFailed = [];
+  const texts = /* @__PURE__ */ new Map();
+  try {
+    for (const source of sources) {
+      try {
+        await page.goto(source, { waitUntil: 'domcontentloaded', timeout: 3e4 });
+        const text = await extractText(page);
+        texts.set(source, text);
+        sourcesRead.push(source);
+      } catch {
+        sourcesFailed.push(source);
+      }
+    }
+    const answers = [];
+    for (const question of questions) {
+      let best = {
+        question: question.question,
+        answer: null,
+        sourcesRead: [],
+        confidence: 0,
+      };
+      for (const [source, text] of texts) {
+        const candidate = bestSentence(text, question.question);
+        if (candidate.score === 0) continue;
+        const questionWords = question.question
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((word) => word.length > 2);
+        const confidence = questionWords.length === 0 ? 0 : candidate.score / questionWords.length;
+        if (confidence > best.confidence) {
+          best = {
+            question: question.question,
+            answer: candidate.sentence,
+            citation: { url: source, snippet: candidate.sentence.slice(0, 300) },
+            sourcesRead: [source],
+            confidence,
+          };
+        }
+      }
+      best.sourcesRead = [...texts.keys()];
+      answers.push(best);
+    }
+    return { answers, sourcesRead, sourcesFailed };
+  } finally {
+    await context.close();
+  }
+}
+function renderResearch(result) {
+  const lines = [];
+  lines.push(
+    `Read ${result.sourcesRead.length} source(s)` +
+      (result.sourcesFailed.length > 0 ? `, ${result.sourcesFailed.length} failed` : '') +
+      '.',
+  );
+  lines.push('');
+  for (const answer of result.answers) {
+    lines.push(`Q: ${answer.question}`);
+    if (answer.answer === null) {
+      lines.push('A: not answered by the sources');
+    } else {
+      lines.push(`A: ${answer.answer}`);
+      if (answer.citation !== void 0) {
+        lines.push(`   (${answer.citation.url})`);
+      }
+      lines.push(`   confidence ${(answer.confidence * 100).toFixed(0)}%`);
+    }
+    lines.push('');
+  }
+  if (result.sourcesFailed.length > 0) {
+    lines.push('Sources that could not be read:');
+    for (const source of result.sourcesFailed) lines.push(`  ${source}`);
+  }
+  return lines.join('\n');
+}
+
+// src/cli/commands/qa.ts
+function registerQa(program) {
+  program
+    .command('diff')
+    .description('compare two pages and report how their trees differ')
+    .option('--a <url>', 'the first URL')
+    .option('--b <url>', 'the second URL')
+    .option('--out <file>', 'write the result to this file')
+    .action(async (options, cmd) => {
+      const global = globalOptions(cmd);
+      if (options.a === void 0 || options.b === void 0) {
+        const message = 'bv diff needs --a <url> and --b <url>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      try {
+        const browser = await launchChromium();
+        let text;
+        let result;
+        try {
+          result = await diffPages(browser, options.a, options.b);
+          text = renderDiff(result);
+        } finally {
+          await browser.close();
+        }
+        if (options.out !== void 0) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir7(dirname8(path), { recursive: true });
+          await writeFile8(path, text, 'utf8');
+        }
+        emit(
+          cmd,
+          result.identical
+            ? ok(result, ['The two pages have the same accessibility tree.'])
+            : fail(result, [text], EXIT.VERIFICATION_FAILED),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('discover-api')
+    .description('report the API endpoints a run actually used')
+    .argument('<runId>', 'the run to inspect')
+    .option('--out <file>', 'write the result to this file')
+    .option('--openapi', 'write an OpenAPI fragment instead', false)
+    .action(async (runId, options, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const facts = await readNetworkFacts(runId, global.cwd);
+        const endpoints = discoverEndpoints(facts);
+        const text =
+          options.openapi === true
+            ? JSON.stringify(asOpenApiFragment(endpoints), null, 2)
+            : renderEndpoints(endpoints);
+        if (options.out !== void 0) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir7(dirname8(path), { recursive: true });
+          await writeFile8(path, text, 'utf8');
+        }
+        emit(cmd, ok({ runId, endpoints, count: endpoints.length }, [text]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('research')
+    .description('answer questions from a set of sources, in the browser')
+    .option('--questions <file>', 'the questions JSON file')
+    .option('--sources <file>', 'the sources file, one URL per line')
+    .option('--out <file>', 'write the result to this file')
+    .action(async (options, cmd) => {
+      const global = globalOptions(cmd);
+      if (options.questions === void 0 || options.sources === void 0) {
+        const message = 'bv research needs --questions <file> and --sources <file>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      try {
+        const questionsRaw = await readFile8(absPath(options.questions, global.cwd), 'utf8');
+        let parsed;
+        try {
+          parsed = JSON.parse(questionsRaw);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          throw new UsageError(`the questions file is not valid JSON: ${detail}`);
+        }
+        const questions = normaliseQuestions(parsed);
+        const sources = (await readFile8(absPath(options.sources, global.cwd), 'utf8'))
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !line.startsWith('#'));
+        const browser = await launchChromium();
+        let result;
+        try {
+          result = await research(browser, questions, sources);
+        } finally {
+          await browser.close();
+        }
+        const text = renderResearch(result);
+        if (options.out !== void 0) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir7(dirname8(path), { recursive: true });
+          await writeFile8(path, text, 'utf8');
+        }
+        emit(cmd, ok(result, [text]));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('report')
+    .description('report what a run found, as Markdown or JSON')
+    .argument('<runId>', 'the run to report on')
+    .option('--format <format>', 'md or json', 'md')
+    .option('--out <file>', 'write the report to this file')
+    .action(async (runId, options, cmd) => {
+      const global = globalOptions(cmd);
+      const format = options.format ?? 'md';
+      if (!['md', 'json'].includes(format)) {
+        const message = `--format must be md or json, not "${format}"`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+      try {
+        const findings = await readFindings(runId, global.cwd);
+        const reports = buildReports(findings, {
+          reproSteps: ['open the url', 'observe the page'],
+        });
+        const text =
+          format === 'json' ? renderReportsJson(reports) : renderFullReport(findings, reports);
+        if (options.out !== void 0) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir7(dirname8(path), { recursive: true });
+          await writeFile8(path, text, 'utf8');
+        }
+        const lines =
+          format === 'json' ? [`${reports.length} problem(s) found.`] : [renderReports(reports)];
+        emit(cmd, ok({ runId, findings, reports }, lines));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+  program
+    .command('audit')
+    .description('show the audit log of a run')
+    .argument('[runId]', 'the run to show (the newest one by default)')
+    .action(async (runId, cmd) => {
+      const global = globalOptions(cmd);
+      try {
+        const id = runId ?? (await newestRun(global.cwd));
+        if (id === void 0) {
+          const message = 'there are no runs yet';
+          emit(cmd, fail({ error: message }, [message], EXIT.FAILURE));
+          return;
+        }
+        const entries = await readAudit(id, global.cwd);
+        const lines = entries.map((entry) => JSON.stringify(entry));
+        emit(
+          cmd,
+          ok({ runId: id, entries }, lines.length > 0 ? lines : ['(the audit log is empty)']),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+}
+async function readNetworkFacts(runId, cwd) {
+  const path = `${runDir(runId, cwd)}/network.json`;
+  try {
+    const raw = await readFile8(path, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    throw new UsageError(
+      `the run ${runId} has no network log. Only a run made with the network watcher has one.`,
+    );
+  }
+}
+function normaliseQuestions(parsed) {
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null && Array.isArray(parsed.questions)
+      ? parsed.questions
+      : void 0;
+  if (list === void 0) {
+    throw new UsageError('the questions file must be a list, or an object with a "questions" list');
+  }
+  return list.map((entry) => {
+    if (typeof entry === 'string') return { question: entry };
+    if (typeof entry === 'object' && entry !== null) {
+      const question = entry.question;
+      const id = entry.id;
+      if (typeof question !== 'string') {
+        throw new UsageError(
+          'every question must be a string or an object with a "question" field',
+        );
+      }
+      return {
+        question,
+        ...(typeof id === 'string' ? { id } : {}),
+      };
+    }
+    throw new UsageError('every question must be a string or an object with a "question" field');
+  });
+}
+async function readFindings(runId, cwd) {
+  const path = `${runDir(runId, cwd)}/findings.json`;
+  try {
+    const raw = await readFile8(path, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    throw new UsageError(
+      `the run ${runId} has no findings. Only a run made by the QA commands has findings.`,
+    );
+  }
+}
+async function readAudit(runId, cwd) {
+  const path = `${runDir(runId, cwd)}/audit.jsonl`;
+  try {
+    const raw = await readFile8(path, 'utf8');
+    return raw
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line));
+  } catch {
+    return [];
+  }
+}
+async function newestRun(cwd) {
+  const { readdir: readdir3 } = await import('fs/promises');
+  try {
+    const entries = await readdir3(runDir('', cwd).replace(/[/\\]$/, ''));
+    const runs = entries.filter((entry) => /^\d{8}T\d{6}-/.test(entry));
+    runs.sort();
+    return runs[runs.length - 1];
+  } catch {
+    return void 0;
+  }
+}
+
 // src/cli/main.ts
 function buildProgram() {
   const program = new Command();
@@ -5445,6 +8836,8 @@ function buildProgram() {
   registerSession(program);
   registerPerception(program);
   registerSafety(program);
+  registerProof(program);
+  registerQa(program);
   setRootProgram(program);
   return program;
 }

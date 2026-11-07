@@ -44,9 +44,26 @@ function daemonEntry(): { command: string; args: string[] } {
   }
 
   // When running from the bundle, re-spawn this bundle with --daemon.
-  const bundle = resolve(here, '..', '..', '..', 'scripts', 'bv.mjs');
-  if (existsSync(bundle)) {
-    return { command: process.execPath, args: [bundle] };
+  //
+  // The bundle's own location is the reliable answer: `import.meta.url`
+  // points at the running file, whatever directory it was installed into.
+  // The package root is one level up from `scripts/`, and the file that is
+  // running is the bundle itself.
+  const self = fileURLToPath(import.meta.url);
+  if (existsSync(self) && self.endsWith('.mjs')) {
+    return { command: process.execPath, args: [self] };
+  }
+
+  // A bundle that was loaded from somewhere else: look for it next to the
+  // package root.
+  for (const candidate of [
+    resolve(here, '..', '..', '..', 'scripts', 'bv.mjs'),
+    resolve(here, '..', '..', 'scripts', 'bv.mjs'),
+    resolve(here, '..', 'scripts', 'bv.mjs'),
+  ]) {
+    if (existsSync(candidate)) {
+      return { command: process.execPath, args: [candidate] };
+    }
   }
 
   throw new UsageError(

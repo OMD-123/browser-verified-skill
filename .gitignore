@@ -8,6 +8,10 @@ dist/
 # Runtime data (session state, runs, vault, playbooks)
 .bv/
 
+# The install test and the packed tarball
+bv-install-test/
+*.tgz
+
 # Coverage
 coverage/
 
