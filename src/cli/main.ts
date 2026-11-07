@@ -15,6 +15,7 @@ import { registerSession } from './commands/session.js';
 import { registerPerception } from './commands/perception.js';
 import { registerSafety } from './commands/safety.js';
 import { registerProof } from './commands/proof.js';
+import { registerQa } from './commands/qa.js';
 import { globalOptions, emittedCode, setRootProgram } from './helpers.js';
 
 /** Global options every command inherits from the root program. */
@@ -47,6 +48,7 @@ export function buildProgram(): Command {
   registerPerception(program);
   registerSafety(program);
   registerProof(program);
+  registerQa(program);
 
   // The global options live on the root program. Recording it here means
   // every command can read them without relying on the shape of the

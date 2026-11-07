@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { registerProof } from '../../src/cli/commands/proof.js';
 import { registerSafety } from '../../src/cli/commands/safety.js';
+import { registerQa } from '../../src/cli/commands/qa.js';
 import { setRootProgram } from '../../src/cli/helpers.js';
 import { connectDaemon, type DaemonClient } from '../../src/core/client.js';
 import type { readRun as ReadRunType } from '../../src/core/runstore/store.js';
@@ -62,6 +63,7 @@ async function run(cwd: string, args: string[]): Promise<Captured> {
   setRootProgram(program);
   registerProof(program);
   registerSafety(program);
+  registerQa(program);
 
   let stdout = '';
   let stderr = '';
@@ -375,6 +377,50 @@ describe('the CLI command modules', () => {
 
     const result = await run(dir, ['approve', 'action-1']);
     expect(result.stdout).toContain('no pending action');
+  });
+
+  // --- bv diff ------------------------------------------------------------
+
+  it('needs both URLs for a diff', async () => {
+    const result = await run(dir, ['diff', '--a', 'http://x/']);
+    expect(result.stdout).toContain('--b');
+  });
+
+  it('reports a diff', async () => {
+    // Two pages that differ, served from the fixture server.
+    const fixture = process.env['BV_FIXTURE_ORIGIN'] ?? 'http://127.0.0.1:3000';
+    const result = await run(dir, [
+      'diff',
+      '--a',
+      `${fixture}/pages/login.html`,
+      '--b',
+      `${fixture}/pages/index.html`,
+    ]);
+    expect(result.stdout).toContain('Only in');
+  });
+
+  // --- bv report ----------------------------------------------------------
+
+  it('rejects an unknown report format', async () => {
+    const result = await run(dir, ['report', 'r1', '--format', 'xml']);
+    expect(result.stdout).toContain('--format must be');
+  });
+
+  it('reports a run with no findings', async () => {
+    const result = await run(dir, ['report', 'no-such-run']);
+    expect(result.stdout).toContain('no findings');
+  });
+
+  // --- bv audit -----------------------------------------------------------
+
+  it('reports that there are no runs', async () => {
+    const result = await run(dir, ['audit']);
+    expect(result.stdout).toContain('no runs');
+  });
+
+  it('shows the audit log of a run', async () => {
+    const result = await run(dir, ['audit', 'some-run']);
+    expect(result.stdout).toContain('empty');
   });
 
   // --- bv rewind ---------------------------------------------------------

@@ -54,10 +54,10 @@ export default defineConfig({
           statements: 44,
         },
         'src/cli/**/*.ts': {
-          branches: 20,
-          lines: 44,
-          functions: 50,
-          statements: 43,
+          branches: 22,
+          lines: 47,
+          functions: 51,
+          statements: 46,
         },
         'src/verify/**/*.ts': {
           branches: 72,
@@ -84,10 +84,10 @@ export default defineConfig({
           statements: 94,
         },
         'src/testing/**/*.ts': {
-          branches: 61,
-          lines: 83,
-          functions: 89,
-          statements: 82,
+          branches: 66,
+          lines: 88,
+          functions: 90,
+          statements: 88,
         },
         'src/llm/**/*.ts': {
           branches: 90,
