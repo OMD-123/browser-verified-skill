@@ -436,14 +436,16 @@ describe('policy evaluation', () => {
     expect(decision.ruleIds).toContain('policy.approval.granted.submit');
   });
 
-  it('denies by default in a non-interactive session', () => {
+  it('asks for an approval in a non-interactive session', () => {
     const policy = openPolicy();
     policy.actionClasses.approvalRequired = ['submit'];
     const decision = evaluate(
       { kind: 'click', role: 'button', name: 'Submit' },
       ctx(policy, { nonInteractive: true }),
     );
-    expect(decision.verdict).toBe('deny');
+    // The session cannot ask, so the action is parked rather than
+    // forbidden. The operator approves it out of band.
+    expect(decision.verdict).toBe('needs_approval');
     expect(decision.ruleIds).toContain('policy.approval.required.submit');
   });
 

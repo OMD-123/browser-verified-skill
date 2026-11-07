@@ -199,12 +199,19 @@ export function evaluate(intent: ActionIntent, ctx: PolicyContext): PolicyDecisi
       return { verdict: 'allow', reasons, ruleIds, actionClass };
     }
     if (ctx.nonInteractive) {
-      // The default in a non-interactive session is deny, not allow.
+      // A non-interactive session cannot ask, so it cannot be approved on
+      // the spot. It does NOT mean the action is forbidden: the caller may
+      // still obtain an approval out of band (`bv approve` in another
+      // terminal) and retry with the token.
+      //
+      // So this is `needs_approval`, not `deny`. The distinction matters:
+      // a denial says "do not do this", while this says "do not do this
+      // without a human's say-so".
       reasons.push(
-        `the "${actionClass}" action class requires approval and this session is non-interactive`,
+        `the "${actionClass}" action class requires approval; this session is non-interactive, so approve it out of band and retry with the token`,
       );
       ruleIds.push(`policy.approval.required.${actionClass}`);
-      return { verdict: 'deny', reasons, ruleIds, actionClass };
+      return { verdict: 'needs_approval', reasons, ruleIds, actionClass };
     }
     reasons.push(`the "${actionClass}" action class requires approval`);
     ruleIds.push(`policy.approval.required.${actionClass}`);

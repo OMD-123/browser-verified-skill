@@ -277,7 +277,7 @@ describe('the safety gate: the approval gate', () => {
     expect(third.allowed).toBe(false);
   });
 
-  it('denies by default in non-interactive mode', () => {
+  it('asks for an approval in non-interactive mode', () => {
     const gate = gateInputs();
     gate.planLock.set(
       createPlan({
@@ -296,10 +296,11 @@ describe('the safety gate: the approval gate', () => {
       gate,
     );
     expect(verdict.allowed).toBe(false);
-    // In non-interactive mode the default is deny: the action is refused
-    // outright rather than parked waiting for an approval that can never
-    // arrive.
-    expect(verdict.next).toBe('deny');
+    // A non-interactive session cannot ask, so it parks the action
+    // waiting for an approval rather than refusing it outright. The
+    // operator can approve it out of band and retry with the token.
+    expect(verdict.next).toBe('needs_approval');
+    expect(verdict.approval).toBeDefined();
   });
 });
 

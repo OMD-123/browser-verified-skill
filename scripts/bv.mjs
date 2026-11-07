@@ -1020,10 +1020,10 @@ function evaluate(intent, ctx) {
     }
     if (ctx.nonInteractive) {
       reasons.push(
-        `the "${actionClass}" action class requires approval and this session is non-interactive`,
+        `the "${actionClass}" action class requires approval; this session is non-interactive, so approve it out of band and retry with the token`,
       );
       ruleIds.push(`policy.approval.required.${actionClass}`);
-      return { verdict: 'deny', reasons, ruleIds, actionClass };
+      return { verdict: 'needs_approval', reasons, ruleIds, actionClass };
     }
     reasons.push(`the "${actionClass}" action class requires approval`);
     ruleIds.push(`policy.approval.required.${actionClass}`);

@@ -44,6 +44,7 @@
   },
   "files": [
     "scripts/bv.mjs",
+    "scripts/acceptance.mjs",
     "policies/",
     "references/",
     "skills/",
@@ -69,6 +70,7 @@
     "cli": "tsx src/cli/main.ts",
     "fixtures": "tsx fixtures/server.ts",
     "verify:all": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "acceptance": "node scripts/acceptance.mjs",
     "prepublishOnly": "npm run verify:all && npm run build"
   },
   "dependencies": {
