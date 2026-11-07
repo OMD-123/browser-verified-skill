@@ -1,5 +1,5 @@
 /**
- * Filesystem layout for browser-verified.
+ * Filesystem layout for browser-verified-skill.
  *
  * Everything runtime lives under `.bv/` in the current working directory:
  *

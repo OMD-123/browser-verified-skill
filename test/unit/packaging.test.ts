@@ -118,7 +118,7 @@ describe('the published artifact', () => {
   it('ships a skill that an agent can read', async () => {
     expect(existsSync(join(ROOT, 'SKILL.md'))).toBe(true);
     const skill = await readFile(join(ROOT, 'SKILL.md'), 'utf8');
-    expect(skill).toContain('name: browser-verified');
+    expect(skill).toContain('name: browser-verified-skill');
     expect(skill).toContain('description:');
   });
 

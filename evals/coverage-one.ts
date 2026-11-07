@@ -16,7 +16,7 @@ const target = process.argv[2] ?? '';
 for (const [file, data] of Object.entries(raw)) {
   const normalised = file.replace(/\\/g, '/');
   if (!normalised.includes(target)) continue;
-  console.log(`\n${normalised.replace(/.*browser-verified\//, '')}`);
+  console.log(`\n${normalised.replace(/.*browser-verified-skill\//, '')}`);
   for (const [id, counts] of Object.entries(data.b)) {
     counts.forEach((count, index) => {
       if (count > 0) return;

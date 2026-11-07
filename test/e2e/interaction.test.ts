@@ -70,7 +70,7 @@ describe('the environment profiles', () => {
     const profile = findProfile('desktop-chrome');
     if (profile === undefined) throw new Error('the profile is missing');
     const options = contextOptionsFor(profile, {
-      userAgent: 'BrowserVerified/1.0 (+@url:`https://example.test/contact`)',
+      userAgent: 'BrowserVerifiedSkill/1.0 (+@url:`https://example.test/contact`)',
     });
     expect(options.userAgent).toContain('BrowserVerified');
   });
@@ -79,10 +79,10 @@ describe('the environment profiles', () => {
 describe('the identity description', () => {
   it('names the user agent and the contact', () => {
     const text = describeIdentity({
-      userAgent: 'BrowserVerified/1.0',
+      userAgent: 'BrowserVerifiedSkill/1.0',
       contactUrl: 'https://example.test/contact',
     });
-    expect(text).toContain('BrowserVerified/1.0');
+    expect(text).toContain('BrowserVerifiedSkill/1.0');
     expect(text).toContain('https://example.test/contact');
   });
 });

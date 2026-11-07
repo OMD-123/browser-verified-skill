@@ -70,7 +70,7 @@ describe('the daemon handlers', () => {
 
     const session = new BrowserSession({
       store,
-      userAgent: 'BrowserVerified/1.0 (+@url:`https://example.test/contact`)',
+      userAgent: 'BrowserVerifiedSkill/1.0 (+@url:`https://example.test/contact`)',
       headed: false,
     });
     await session.launch();

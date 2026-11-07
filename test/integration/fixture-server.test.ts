@@ -67,7 +67,7 @@ describe('fixture server', () => {
     // Either the traversal is rejected outright or it 404s; it must never
     // return the contents of a file outside the pages directory.
     const body = await res.text();
-    expect(body).not.toContain('browser-verified');
+    expect(body).not.toContain('browser-verified-skill');
   });
 
   it('serves the staging/prod pair with an intentional difference', async () => {

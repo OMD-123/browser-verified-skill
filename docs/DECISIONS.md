@@ -110,7 +110,7 @@ hash in `daemon.json` verifies it. Recorded honestly in `KNOWN_LIMITATIONS.md`.
 
 ## D-0005 — Playwright is launched with an honest, configurable User-Agent
 
-**Decision.** The default user agent is `BrowserVerified/<version> (+<contact-url>)`,
+**Decision.** The default user agent is `BrowserVerifiedSkill/<version> (+<contact-url>)`,
 where the contact URL comes from `policy.compliance.userAgentSuffix` or the
 `BV_CONTACT_URL` environment variable. It is applied at the **context** level via
 `browser.newContext({ userAgent })`.
@@ -681,7 +681,7 @@ sync; both delegate to `runDaemonProcess`.
 **Amendment (Phase 7).** The bundle path was resolved against the _source_
 layout (`../../../scripts/bv.mjs`), which does not exist in an installed
 package — the bundle lives at
-`node_modules/browser-verified/scripts/bv.mjs`. The daemon entry is now
+`node_modules/browser-verified-skill/scripts/bv.mjs`. The daemon entry is now
 found from `import.meta.url`, which is the running file wherever it was
 installed. This was caught by installing the tarball and running it, not by
 any test in the repository: every other test passed.

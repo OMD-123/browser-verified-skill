@@ -213,6 +213,6 @@ export function handoffMessage(url: string, challenge: Challenge): string {
     `Reason: ${challenge.reason}`,
     '',
     'Complete the challenge in the browser window, then run `bv resume`.',
-    'browser-verified does not solve CAPTCHAs, bypass logins or guess 2FA codes.',
+    'browser-verified-skill does not solve CAPTCHAs, bypass logins or guess 2FA codes.',
   ].join('\n');
 }

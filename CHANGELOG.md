@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `browser-verified` are recorded here.
+All notable changes to `browser-verified-skill` are recorded here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -126,4 +126,4 @@ Issues found by the project's own tests and acceptance script during development
 
 ---
 
-[1.0.0]: https://github.com/OMD-123/browser-verified/releases/tag/v1.0.0
+[1.0.0]: https://github.com/OMD-123/browser-verified-skill/releases/tag/v1.0.0

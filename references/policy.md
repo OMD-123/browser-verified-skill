@@ -52,7 +52,7 @@ rate:
 
 compliance:
   respectRobots: true
-  userAgentSuffix: 'BrowserVerified/1.0 (+@url:`https://your-site/contact`)`'
+  userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)`'
   captcha: human_handoff # or `deny`
   evalReadonly: false
 

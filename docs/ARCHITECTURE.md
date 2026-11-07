@@ -1,6 +1,6 @@
 # Architecture
 
-This document maps the modules of `browser-verified`, explains the boundaries
+This document maps the modules of `browser-verified-skill`, explains the boundaries
 between them, and records the invariants that the rest of the codebase relies
 on. Design decisions and their rejected alternatives live in
 [`DECISIONS.md`](DECISIONS.md).

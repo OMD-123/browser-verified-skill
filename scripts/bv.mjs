@@ -93,7 +93,7 @@ function findManifest() {
     if (existsSync(candidate)) {
       try {
         const parsed = JSON.parse(readFileSync(candidate, "utf8"));
-        if (parsed.name === "browser-verified") return parsed;
+        if (parsed.name === "browser-verified-skill") return parsed;
       } catch {
       }
     }
@@ -114,7 +114,7 @@ var init_version = __esm({
     "use strict";
     manifest = findManifest();
     VERSION = typeof manifest.version === "string" ? manifest.version : "0.0.0";
-    DESCRIPTION = typeof manifest.description === "string" ? manifest.description : "Browser-verified: safety-first browser automation with evidence and self-repair.";
+    DESCRIPTION = typeof manifest.description === "string" ? manifest.description : "Browser-verified-skill: safety-first browser automation with evidence and self-repair.";
   }
 });
 
@@ -458,7 +458,7 @@ function defaultPolicy() {
     rate: { maxRpsPerDomain: 1, jitterMs: [300, 1200] },
     compliance: {
       respectRobots: true,
-      userAgentSuffix: "BrowserVerified/1.0 (+@url:`https://your-site/contact`)",
+      userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
       captcha: "human_handoff",
       evalReadonly: false
     },
@@ -481,12 +481,16 @@ async function loadPolicy(cwd = process.cwd()) {
   try {
     parsed = YAML.parse(raw);
   } catch (err) {
-    throw new Error(`the policy at ${path} is not valid YAML: ${messageOf(err)}`);
+    throw new Error(`the policy at ${path} is not valid YAML: ${messageOf(err)}`, {
+      cause: err
+    });
   }
   try {
     return validatePolicy(parsed);
   } catch (err) {
-    throw new Error(`the policy at ${path} is not valid: ${messageOf(err)}`);
+    throw new Error(`the policy at ${path} is not valid: ${messageOf(err)}`, {
+      cause: err
+    });
   }
 }
 function rejectForbiddenKeys(raw) {
@@ -502,7 +506,7 @@ function rejectForbiddenKeys(raw) {
       const forbidden = FORBIDDEN_KEYS.find((f) => f.key.toLowerCase() === key.toLowerCase());
       if (forbidden !== void 0) {
         throw new Error(
-          `policy key "${keyPath}" is not allowed: ${forbidden.because}. browser-verified does not implement these capabilities and will not accept a policy that asks for them.`
+          `policy key "${keyPath}" is not allowed: ${forbidden.because}. browser-verified-skill does not implement these capabilities and will not accept a policy that asks for them.`
         );
       }
       walk(value, keyPath);
@@ -561,7 +565,7 @@ var init_policy = __esm({
       /** Respect robots.txt. */
       respectRobots: z.boolean().default(true),
       /** The honest user-agent suffix, including a contact URL. */
-      userAgentSuffix: z.string().default("BrowserVerified/1.0 (+@url:`https://your-site/contact`)"),
+      userAgentSuffix: z.string().default("BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)"),
       /** What to do when a challenge is detected. */
       captcha: z.enum(["human_handoff", "deny"]).default("human_handoff"),
       /** Allow `eval-readonly`. Off by default: it is the most powerful primitive. */
@@ -606,7 +610,7 @@ var init_policy = __esm({
       rate: RateSchema.default({ maxRpsPerDomain: 1, jitterMs: [300, 1200] }),
       compliance: ComplianceSchema.default({
         respectRobots: true,
-        userAgentSuffix: "BrowserVerified/1.0 (+@url:`https://your-site/contact`)",
+        userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
         captcha: "human_handoff",
         evalReadonly: false
       }),
@@ -1927,7 +1931,7 @@ var init_server = __esm({
       },
       {
         name: "compile",
-        description: "Compile a recorded run into a plain Playwright TypeScript script. The script imports nothing from browser-verified, so it runs in any Playwright project.",
+        description: "Compile a recorded run into a plain Playwright TypeScript script. The script imports nothing from browser-verified-skill, so it runs in any Playwright project.",
         inputSchema: {
           type: "object",
           properties: { runId: { type: "string", description: "the run to compile" } },
@@ -2045,7 +2049,7 @@ async function createMcpServer(options) {
     }
   };
   return new McpServer(registry2, BROWSER_TOOLS, {
-    name: options.name ?? "browser-verified",
+    name: options.name ?? "browser-verified-skill",
     version: options.version ?? "1.0.0"
   });
 }
@@ -4059,7 +4063,7 @@ function countAll(nodes) {
 }
 function buildUserAgent(contact) {
   const suffix = contact !== void 0 && contact.length > 0 ? ` (+${contact})` : "";
-  return `BrowserVerified/${VERSION}${suffix}`;
+  return `BrowserVerifiedSkill/${VERSION}${suffix}`;
 }
 var BrowserSession;
 var init_session = __esm({
@@ -6257,7 +6261,7 @@ function daemonEntry() {
     }
   }
   throw new UsageError(
-    "could not locate the session daemon entry point. Reinstall browser-verified or run from the repository."
+    "could not locate the session daemon entry point. Reinstall browser-verified-skill or run from the repository."
   );
 }
 function spawnDaemon(options) {
@@ -6648,7 +6652,7 @@ function decryptVault(file, passphrase) {
     throw new Error(`unsupported vault version: ${String(file.version)}`);
   }
   if (file.magic !== VAULT_MAGIC) {
-    throw new Error("this file is not a browser-verified vault");
+    throw new Error("this file is not a browser-verified-skill vault");
   }
   const salt = Buffer.from(file.salt, "hex");
   const iv = Buffer.from(file.iv, "hex");
@@ -7155,12 +7159,12 @@ function compileFlow(run2, name = "flow") {
 }
 function renderScript(flow) {
   const lines = [];
-  lines.push("// Generated by browser-verified. Compiled from a recorded run.");
+  lines.push("// Generated by browser-verified-skill. Compiled from a recorded run.");
   if (flow.goal !== void 0) {
     lines.push(`// Goal: ${flow.goal}`);
   }
   lines.push("//");
-  lines.push("// This script is plain Playwright: it needs no browser-verified code.");
+  lines.push("// This script is plain Playwright: it needs no browser-verified-skill code.");
   lines.push("// Review it, put it in version control, and run it in CI.");
   lines.push("");
   lines.push("import { test, expect, type Page, type Locator } from '@playwright/test';");
@@ -7527,7 +7531,7 @@ function registerProof(program) {
     try {
       const { createMcpServer: createMcpServer2 } = await Promise.resolve().then(() => (init_wiring(), wiring_exports));
       const server = await createMcpServer2({ cwd: global.cwd });
-      process.stderr.write("browser-verified MCP server ready on stdio\n");
+      process.stderr.write("browser-verified-skill MCP server ready on stdio\n");
       await server.serve(process.stdin, process.stdout);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -8433,7 +8437,7 @@ function runRedTeam() {
       });
       continue;
     }
-    let caught = false;
+    let caught;
     try {
       caught = attack.check?.() === true;
     } catch {

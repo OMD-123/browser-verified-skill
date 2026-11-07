@@ -27,7 +27,7 @@ function basePolicy(): Policy {
     actionClasses: { approvalRequired: [], deny: [] },
     compliance: {
       respectRobots: true,
-      userAgentSuffix: 'BrowserVerified/1.0 (+https://example.test/contact)',
+      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+https://example.test/contact)',
       captcha: 'human_handoff',
       evalReadonly: false,
     },

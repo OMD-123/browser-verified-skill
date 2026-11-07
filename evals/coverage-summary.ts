@@ -19,7 +19,7 @@ for (const [file, data] of Object.entries(summary)) {
   if (file === 'total') continue;
   const normalised = file.replace(/\\/g, '/');
   if (!normalised.includes(target)) continue;
-  const rel = normalised.replace(/.*browser-verified\//, '');
+  const rel = normalised.replace(/.*browser-verified-skill\//, '');
   const gaps: string[] = [];
   if (data.branches.pct < branchFloor) gaps.push(`br ${data.branches.pct}%`);
   if (data.statements.pct < stmtFloor) gaps.push(`st ${data.statements.pct}%`);

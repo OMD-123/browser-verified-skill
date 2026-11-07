@@ -370,7 +370,7 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
     name: 'compile',
     description:
       'Compile a recorded run into a plain Playwright TypeScript script. The script imports ' +
-      'nothing from browser-verified, so it runs in any Playwright project.',
+      'nothing from browser-verified-skill, so it runs in any Playwright project.',
     inputSchema: {
       type: 'object',
       properties: { runId: { type: 'string', description: 'the run to compile' } },

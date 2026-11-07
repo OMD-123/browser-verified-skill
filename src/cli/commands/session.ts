@@ -67,7 +67,7 @@ function daemonEntry(): { command: string; args: string[] } {
   }
 
   throw new UsageError(
-    'could not locate the session daemon entry point. Reinstall browser-verified or run from the repository.',
+    'could not locate the session daemon entry point. Reinstall browser-verified-skill or run from the repository.',
   );
 }
 

@@ -139,12 +139,12 @@ export async function fetchRobots(
 /**
  * The robot's name used when matching `User-agent` rules.
  *
- * The honest user agent is `BrowserVerified/<version> (+<contact>)`, so
+ * The honest user agent is `BrowserVerifiedSkill/<version> (+<contact>)`, so
  * robots.txt rules that match `BrowserVerified` or `*` apply.
  */
 export function robotsUserAgent(userAgentSuffix: string): string {
   // `robots-parser` matches the user agent by the product token, so the
   // version and the contact suffix are dropped.
   const match = /^([A-Za-z][A-Za-z0-9-]*)/.exec(userAgentSuffix);
-  return match?.[1] ?? 'BrowserVerified';
+  return match?.[1] ?? 'BrowserVerifiedSkill';
 }

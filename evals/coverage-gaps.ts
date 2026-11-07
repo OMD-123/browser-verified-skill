@@ -18,7 +18,7 @@ let hit = 0;
 for (const [file, data] of Object.entries(raw)) {
   const normalised = file.replace(/\\/g, '/');
   if (!normalised.includes('src/safety')) continue;
-  const rel = normalised.replace(/.*browser-verified\//, '');
+  const rel = normalised.replace(/.*browser-verified-skill\//, '');
 
   const uncovered: string[] = [];
   for (const [id, branchCounts] of Object.entries(data.b)) {

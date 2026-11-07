@@ -1,6 +1,6 @@
 # Security model
 
-`browser-verified` (CLI: `bv`) is a browser-automation toolkit built for
+`browser-verified-skill` (CLI: `bv`) is a browser-automation toolkit built for
 **verified, auditable, replayable** automation. It is explicitly **not** a
 stealth, evasion, or bulk-abuse tool.
 
@@ -163,7 +163,7 @@ reaches the network.
   pauses, prints `Human needed at <url>`, and waits for `bv resume`. The browser
   must be headed. The human's steps are captured as an annotated segment of the
   run, reusable as a playbook.
-- The **user agent is honest**: `BrowserVerified/<version> (+<contact-url>)`,
+- The **user agent is honest**: `BrowserVerifiedSkill/<version> (+<contact-url>)`,
   applied at the context level.
 
 ### 2.9 The agent loop (Mode B)

@@ -1,18 +1,22 @@
-# browser-verified
+# browser-verified-skill
 
 **Explore once with an AI agent, prove the result with evidence, compile it to a plain Playwright script, replay it for free, and heal only the steps that break.**
 
-`browser-verified` (CLI: `bv`) is an open-source browser-automation toolkit built as an
-**Agent Skill**. It exists for the case where an agent drives a real browser and you need
-the result to be **provable**, **auditable** and **reproducible** — not a transcript that
-claims it worked.
+`browser-verified-skill` (CLI: `bv`) is an open-source **Agent Skill** for browser
+automation. Drop it into an agent — Claude Code, Hermes, or anything that speaks MCP or
+the CLI — and the agent can drive a real browser while every action passes a policy gate,
+every run leaves an auditable artifact, and the whole run compiles into a plain Playwright
+script that replays for free.
+
+It exists for the case where an agent drives a real browser and you need the result to be
+**provable**, **auditable** and **reproducible** — not a transcript that claims it worked.
 
 It is **not** a stealth tool. There is no fingerprint spoofing, no CAPTCHA solving, no
 proxy rotation and no bot-detection evasion. The user agent is honest, CAPTCHA and login
 walls trigger a human handoff, and `robots.txt` is respected.
 
-[![CI](https://github.com/OMD-123/browser-verified/actions/workflows/ci.yml/badge.svg)](https://github.com/OMD-123/browser-verified/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/browser-verified.svg)](https://www.npmjs.com/package/browser-verified)
+[![CI](https://github.com/OMD-123/browser-verified-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/OMD-123/browser-verified-skill/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/browser-verified-skill.svg)](https://www.npmjs.com/package/browser-verified-skill)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-5FA04E.svg)](https://nodejs.org)
 [![typescript](https://img.shields.io/badge/typescript-5.9-blue.svg)](https://www.typescriptlang.org)
@@ -61,10 +65,10 @@ all.
 Today the button has a generated class name. The script breaks, and fixing it by hand is
 the thing you were trying to avoid.
 
-`browser-verified` is built around one idea: **a browser run should leave behind an
+`browser-verified-skill` is built around one idea: **a browser run should leave behind an
 artifact you can trust, compile, and re-run for free.**
 
-| Problem                              | What `browser-verified` does                                                                                                              |
+| Problem                              | What `browser-verified-skill` does                                                                                                        |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | "It worked" is unverifiable          | Every run produces a diffed accessibility-tree snapshot, an audit log, and a success condition that is checked against the live page.     |
 | Re-running costs money               | `bv compile` turns a run into a plain Playwright script. `bv replay` runs it deterministically with zero LLM cost.                        |
@@ -76,7 +80,7 @@ artifact you can trust, compile, and re-run for free.**
 ## The 60-second quickstart
 
 ```bash
-npm install -g browser-verified     # or: npx browser-verified
+npm install -g browser-verified-skill     # or: npx browser-verified-skill
 bv doctor --install                 # check node + install the Chromium build
 bv init                             # create .bv/ and a default policy
 bv session start --headed           # a real, visible browser
@@ -109,6 +113,42 @@ bv act click 'role=button name="Submit"' --approve <token>
 ```
 
 The token is bound to that exact action and works once.
+
+### Install it as an Agent Skill
+
+This is what the package _is_. Three ways to wire it in:
+
+**As an MCP server** — the agent calls the browser tools directly:
+
+```jsonc
+// Claude Desktop / Claude Code
+{
+  "mcpServers": {
+    "browser-verified": {
+      "command": "bv",
+      "args": ["mcp"],
+    },
+  },
+}
+```
+
+**As a skill file** — copy `SKILL.md` into your agent's skills directory. It teaches the
+agent the exit-code contract, the target-descriptor format, and when to stop rather than
+retry:
+
+```bash
+# Claude Code
+cp SKILL.md ~/.claude/skills/browser-verified-skill/SKILL.md
+
+# Hermes
+cp SKILL.md ~/AppData/Local/hermes/skills/browser-verified-skill/SKILL.md
+```
+
+**As a CLI** — the agent shells out to `bv`. This is Mode A, and it needs no API key and
+no MCP server.
+
+Whichever route you take, the agent goes through the same daemon and the same policy
+engine. There is no route through this tool that skips a check.
 
 ### Check it works
 
@@ -305,7 +345,7 @@ as it is on the command line.
 // Claude Desktop / Claude Code config
 {
   "mcpServers": {
-    "browser-verified": {
+    "browser-verified-skill": {
       "command": "bv",
       "args": ["mcp"],
     },
@@ -323,12 +363,12 @@ The point of the whole thing.
 bv compile <runId> --out flows/login.spec.ts
 ```
 
-The output is **plain Playwright**. It imports nothing from `browser-verified`:
+The output is **plain Playwright**. It imports nothing from `browser-verified-skill`:
 
 ```typescript
-// Generated by browser-verified. Compiled from a recorded run.
+// Generated by browser-verified-skill. Compiled from a recorded run.
 //
-// This script is plain Playwright: it needs no browser-verified code.
+// This script is plain Playwright: it needs no browser-verified-skill code.
 // Review it, put it in version control, and run it in CI.
 
 import { test, expect, type Page, type Locator } from '@playwright/test';
@@ -483,7 +523,7 @@ guessed.
 ## Architecture
 
 ```text
-browser-verified/
+browser-verified-skill/
 ├── SKILL.md                 # the Agent Skill (<500 lines)
 ├── references/              # progressive disclosure docs
 ├── skills/                  # example skills (the format, and one real one)
@@ -530,19 +570,20 @@ was chosen, what was rejected and why. A few that shape everything else:
 ## Installation
 
 ```bash
-npm install -g browser-verified
+npm install -g browser-verified-skill
 npx playwright install chromium
 bv doctor
 ```
 
 Requires **Node.js 20+** and **Chromium** (installed by Playwright). macOS, Linux and
-Windows are supported.
+Windows are supported. The only native dependency, `better-sqlite3`, ships prebuilt
+binaries for all three — there is no compiler step.
 
 ### From source
 
 ```bash
-git clone https://github.com/OMD-123/browser-verified.git
-cd browser-verified
+git clone https://github.com/OMD-123/browser-verified-skill.git
+cd browser-verified-skill-skill
 npm install
 npx playwright install chromium
 npm run verify:all      # typecheck + lint + test + build
@@ -587,7 +628,7 @@ rate:
 
 compliance:
   respectRobots: true
-  userAgentSuffix: 'BrowserVerified/1.0 (+@url:`https://your-site/contact`)`'
+  userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)`'
   captcha: human_handoff
   evalReadonly: false
 
@@ -663,19 +704,19 @@ bv memory ls|rm|prune
 
 ## FAQ
 
-### Does browser-verified need an API key?
+### Does browser-verified-skill need an API key?
 
 **No, for Mode A.** Every command works without a model and without a key. Mode B — where
 a model decides what to do — needs one, but `bv doctor` tells you exactly what is
 missing.
 
-### Is browser-verified a stealth browser?
+### Is browser-verified-skill a stealth browser?
 
 **No.** There is no `navigator.webdriver` masking, no fingerprint spoofing, no user-agent
 randomisation and no proxy rotation. The user agent identifies the tool and carries a
 contact URL you control. A policy that asks for stealth is rejected at load time.
 
-### How does browser-verified protect against prompt injection?
+### How does browser-verified-skill protect against prompt injection?
 
 Five layers: an instruction-phrase lexicon, invisible-character detection (bidi
 overrides, zero-width), a fake-system-banner detector, hidden-text and CSS-content
@@ -686,7 +727,7 @@ cannot be put into a payment field or a message recipient.
 It is a **speed bump, not a wall.** A novel phrasing may pass. The red-team suite
 measures this and the misses are published.
 
-### What does "browser-verified" actually verify?
+### What does "browser-verified-skill" actually verify?
 
 Three things, and they are different:
 
@@ -697,7 +738,7 @@ Three things, and they are different:
 
 ### What does the compiled Playwright script look like?
 
-Plain TypeScript importing only `@playwright/test`. No `browser-verified` import, no
+Plain TypeScript importing only `@playwright/test`. No `browser-verified-skill` import, no
 daemon, no API key. The full example is in
 [Compiled Playwright scripts](#compiled-playwright-scripts).
 
@@ -707,7 +748,7 @@ Every element is located through a recorded fallback chain — ref, role+name, l
 testid, css — tried in that order. `--heal` uses the fallbacks when the primary locator
 breaks, and `bv drift` reports every change so you can review what the tool decided.
 
-### Where does browser-verified store data?
+### Where does browser-verified-skill store data?
 
 Everything under `.bv/` in your working directory:
 
@@ -810,6 +851,6 @@ merged. The gate is the product.
 
 **Explore once. Prove it. Compile it. Replay it free.**
 
-`browser-verified` — browser automation with evidence.
+`browser-verified-skill` — browser automation with evidence.
 
 </div>

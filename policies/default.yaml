@@ -1,4 +1,4 @@
-# browser-verified default policy
+# browser-verified-skill default policy
 #
 # Copy to .bv/policy.yaml (bv init does this) and edit to taste.
 # The schema is validated with zod .strict(): an unknown key is a hard error.
@@ -50,7 +50,7 @@ rate:
 compliance:
   respectRobots: true
   # Honest user agent. Keep the contact URL accurate so site owners can reach you.
-  userAgentSuffix: "BrowserVerified/1.0 (+@url:`https://your-site/contact`)"
+  userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)"
   captcha: human_handoff
   # eval-readonly is off by default; enabling it allows DOM reads only.
   evalReadonly: false

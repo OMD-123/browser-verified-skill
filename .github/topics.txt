@@ -1,52 +1,31 @@
+# GitHub repository topics.
+#
+# GitHub allows a maximum of 20 topics per repository, so this list is
+# capped at 20 and chosen for discoverability rather than exhaustiveness.
+#
+# Apply them with:
+#   gh repo edit OMD-123/browser-verified-skill $(sed 's/^/--add-topic /' .github/topics.txt | tr '\n' ' ')
+#
+# The npm package carries a longer keyword list (44 entries) because npm
+# has no such limit.
+
 browser-automation
 playwright
 ai-agent
 agent-skill
 agent-skills
-llm
 agent-safety
 prompt-injection
 prompt-injection-defense
-prompt-injection-detection
 self-healing
 self-healing-tests
 test-automation
 e2e-testing
-e2e
 browser-testing
-web-testing
 visual-regression
 accessibility-testing
-accessibility
-axe-core
 security
-security-tools
 mcp
 model-context-protocol
-automation
 headless-browser
-headless
-chrome-devtools
-chrome-devtools-protocol
-proof
-evidence
-audit-trail
-auditable
-reproducible
-reproducibility
 web-scraping
-web-crawler
-crawler
-qa-automation
-regression-testing
-ci-cd
-continuous-integration
-flaky-tests
-flaky-test-detection
-typescript
-nodejs
-open-source
-developer-tools
-devtools
-agent-tooling
-llm-tools

@@ -48,7 +48,7 @@ describe('the MCP server against a real daemon', () => {
 
     session = new BrowserSession({
       store,
-      userAgent: 'BrowserVerified/1.0 (+@url:`https://example.test/contact`)',
+      userAgent: 'BrowserVerifiedSkill/1.0 (+@url:`https://example.test/contact`)',
       headed: true,
     });
     await session.launch();
@@ -109,7 +109,7 @@ describe('the MCP server against a real daemon', () => {
       },
     };
 
-    mcp = new McpServer(registry, [], { name: 'browser-verified', version: '0.1.0' });
+    mcp = new McpServer(registry, [], { name: 'browser-verified-skill', version: '0.1.0' });
 
     // A plan that allows the submit class, so the action reaches the
     // approval check rather than being refused as off-plan.

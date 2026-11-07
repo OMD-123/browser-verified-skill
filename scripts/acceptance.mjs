@@ -280,7 +280,7 @@ try {
     const imports = [...source.matchAll(/^import .*from ['"]([^'"]+)['"]/gm)].map(
       (match) => match[1],
     );
-    const bvImports = imports.filter((name) => name.includes('browser-verified'));
+    const bvImports = imports.filter((name) => name.includes('browser-verified-skill'));
     assert(bvImports.length === 0, `the script imports ${bvImports.join(', ')}`);
     return `it imports only ${imports.join(', ')}`;
   });

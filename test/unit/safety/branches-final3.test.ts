@@ -23,7 +23,7 @@ describe('the HAR redactor: the optional fields', () => {
     return {
       log: {
         version: '1.2',
-        creator: { name: 'browser-verified', version: '0.1.0' },
+        creator: { name: 'browser-verified-skill', version: '0.1.0' },
         pages: [],
         entries: [
           {
@@ -107,7 +107,7 @@ describe('the HAR finalizer', () => {
     const log: HarLog = {
       log: {
         version: '1.2',
-        creator: { name: 'browser-verified', version: '0.1.0' },
+        creator: { name: 'browser-verified-skill', version: '0.1.0' },
         pages: [],
         entries: [
           {
@@ -223,7 +223,9 @@ describe('the vault: the file marker', () => {
   it('rejects a file that is not a vault', () => {
     const file = encryptVault({ secrets: {} }, 'passphrase');
     const notAVault = { ...file, magic: 'XXXX' as 'BVV1' };
-    expect(() => decryptVault(notAVault, 'passphrase')).toThrow(/not a browser-verified vault/);
+    expect(() => decryptVault(notAVault, 'passphrase')).toThrow(
+      /not a browser-verified-skill vault/,
+    );
   });
 
   it('lists the secrets it holds', async () => {
@@ -263,8 +265,8 @@ describe('the rate limiter: the wait path', () => {
 });
 
 describe('the robots helper: the token fallback', () => {
-  it('falls back to BrowserVerified for an unparseable user agent', () => {
-    expect(robotsUserAgent('')).toBe('BrowserVerified');
+  it('falls back to BrowserVerifiedSkill for an unparseable user agent', () => {
+    expect(robotsUserAgent('')).toBe('BrowserVerifiedSkill');
   });
 
   it('keeps a fresh entry in the cache', () => {

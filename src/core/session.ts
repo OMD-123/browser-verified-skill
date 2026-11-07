@@ -427,7 +427,7 @@ function countAll(nodes: readonly AxNode[]): number {
  */
 export function buildUserAgent(contact: string | undefined): string {
   const suffix = contact !== undefined && contact.length > 0 ? ` (+${contact})` : '';
-  return `BrowserVerified/${VERSION}${suffix}`;
+  return `BrowserVerifiedSkill/${VERSION}${suffix}`;
 }
 
 /** The context options a session uses. */

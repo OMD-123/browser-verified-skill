@@ -29,7 +29,7 @@ function server(overrides: McpToolRegistry = {}): McpServer {
     ...overrides,
   };
   return new McpServer(tools, BROWSER_TOOLS, {
-    name: 'browser-verified',
+    name: 'browser-verified-skill',
     version: '0.1.0',
   });
 }
@@ -39,7 +39,7 @@ describe('the MCP protocol', () => {
     const response = await server().handle({ jsonrpc: '2.0', id: 1, method: 'initialize' });
     const result = response?.result as { protocolVersion: string; serverInfo: { name: string } };
     expect(result.protocolVersion).toBe(MCP_PROTOCOL_VERSION);
-    expect(result.serverInfo.name).toBe('browser-verified');
+    expect(result.serverInfo.name).toBe('browser-verified-skill');
   });
 
   it('advertises the tool capability', async () => {

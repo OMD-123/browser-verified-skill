@@ -96,7 +96,9 @@ export const ComplianceSchema = z
     /** Respect robots.txt. */
     respectRobots: z.boolean().default(true),
     /** The honest user-agent suffix, including a contact URL. */
-    userAgentSuffix: z.string().default('BrowserVerified/1.0 (+@url:`https://your-site/contact`)'),
+    userAgentSuffix: z
+      .string()
+      .default('BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)'),
     /** What to do when a challenge is detected. */
     captcha: z.enum(['human_handoff', 'deny']).default('human_handoff'),
     /** Allow `eval-readonly`. Off by default: it is the most powerful primitive. */
@@ -166,7 +168,7 @@ export const PolicySchema = z
     rate: RateSchema.default({ maxRpsPerDomain: 1, jitterMs: [300, 1200] }),
     compliance: ComplianceSchema.default({
       respectRobots: true,
-      userAgentSuffix: 'BrowserVerified/1.0 (+@url:`https://your-site/contact`)',
+      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)',
       captcha: 'human_handoff',
       evalReadonly: false,
     }),
@@ -198,7 +200,7 @@ export function defaultPolicy(): Policy {
     rate: { maxRpsPerDomain: 1, jitterMs: [300, 1200] },
     compliance: {
       respectRobots: true,
-      userAgentSuffix: 'BrowserVerified/1.0 (+@url:`https://your-site/contact`)',
+      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)',
       captcha: 'human_handoff',
       evalReadonly: false,
     },
@@ -259,13 +261,17 @@ export async function loadPolicy(cwd: string = process.cwd()): Promise<Policy> {
   try {
     parsed = YAML.parse(raw);
   } catch (err) {
-    throw new Error(`the policy at ${path} is not valid YAML: ${messageOf(err)}`);
+    throw new Error(`the policy at ${path} is not valid YAML: ${messageOf(err)}`, {
+      cause: err,
+    });
   }
 
   try {
     return validatePolicy(parsed);
   } catch (err) {
-    throw new Error(`the policy at ${path} is not valid: ${messageOf(err)}`);
+    throw new Error(`the policy at ${path} is not valid: ${messageOf(err)}`, {
+      cause: err,
+    });
   }
 }
 
@@ -310,7 +316,7 @@ export function rejectForbiddenKeys(raw: unknown): void {
       if (forbidden !== undefined) {
         throw new Error(
           `policy key "${keyPath}" is not allowed: ${forbidden.because}. ` +
-            'browser-verified does not implement these capabilities and will not accept a policy that asks for them.',
+            'browser-verified-skill does not implement these capabilities and will not accept a policy that asks for them.',
         );
       }
       walk(value, keyPath);

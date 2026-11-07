@@ -291,7 +291,7 @@ export function registerProof(program: Command): void {
         const server = await createMcpServer({ cwd: global.cwd });
         // The MCP server speaks JSON-RPC over stdio. The banner goes to
         // stderr, because stdout carries the protocol.
-        process.stderr.write('browser-verified MCP server ready on stdio\n');
+        process.stderr.write('browser-verified-skill MCP server ready on stdio\n');
         await server.serve(process.stdin, process.stdout);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

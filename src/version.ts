@@ -11,10 +11,10 @@ interface Manifest {
 }
 
 /**
- * Find the `browser-verified` package manifest.
+ * Find the `browser-verified-skill` package manifest.
  *
  * Walks up from this module's directory looking for a `package.json` whose
- * `name` is `browser-verified`. This works from `src/` (source runs) and from
+ * `name` is `browser-verified-skill`. This works from `src/` (source runs) and from
  * `scripts/` (the bundled CLI), without hard-coding a relative depth.
  */
 function findManifest(): Manifest {
@@ -24,7 +24,7 @@ function findManifest(): Manifest {
     if (existsSync(candidate)) {
       try {
         const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as Manifest;
-        if (parsed.name === 'browser-verified') return parsed;
+        if (parsed.name === 'browser-verified-skill') return parsed;
       } catch {
         // Unreadable or malformed: keep walking up.
       }
@@ -52,4 +52,4 @@ export const VERSION: string = typeof manifest.version === 'string' ? manifest.v
 export const DESCRIPTION: string =
   typeof manifest.description === 'string'
     ? manifest.description
-    : 'Browser-verified: safety-first browser automation with evidence and self-repair.';
+    : 'Browser-verified-skill: safety-first browser automation with evidence and self-repair.';

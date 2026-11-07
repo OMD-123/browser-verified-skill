@@ -305,11 +305,12 @@ export async function measurePerf(page: Page, url: string): Promise<PerfMetrics>
   const timing = await page.evaluate(() => {
     const navigation = performance.getEntriesByType('navigation')[0] as
       PerformanceNavigationTiming | undefined;
-    let longTasks = 0;
+    let longTasks: number;
     try {
       const entries = performance.getEntriesByType('longtask');
       longTasks = entries.length;
     } catch {
+      // The longtask API is not available; the count stays 0.
       longTasks = 0;
     }
     return {

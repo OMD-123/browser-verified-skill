@@ -23,7 +23,7 @@ import { vaultPath } from '../core/paths.js';
 /**
  * The format marker written at the start of a vault file.
  *
- * It is not secret: it says "this is a browser-verified vault", so a wrong
+ * It is not secret: it says "this is a browser-verified-skill vault", so a wrong
  * file is reported as such rather than as a decryption failure.
  */
 const VAULT_MAGIC = 'BVV1';
@@ -101,7 +101,7 @@ export function decryptVault(file: VaultFile, passphrase: string): VaultContents
     throw new Error(`unsupported vault version: ${String(file.version)}`);
   }
   if (file.magic !== VAULT_MAGIC) {
-    throw new Error('this file is not a browser-verified vault');
+    throw new Error('this file is not a browser-verified-skill vault');
   }
   const salt = Buffer.from(file.salt, 'hex');
   const iv = Buffer.from(file.iv, 'hex');

@@ -123,8 +123,8 @@ describe('robots.txt', () => {
   });
 
   it('extracts the product token for the user agent', () => {
-    expect(robotsUserAgent('BrowserVerified/1.0 (+https://example.test/contact)')).toBe(
-      'BrowserVerified',
+    expect(robotsUserAgent('BrowserVerifiedSkill/1.0 (+https://example.test/contact)')).toBe(
+      'BrowserVerifiedSkill',
     );
     expect(robotsUserAgent('something-else')).toBe('something-else');
   });
@@ -320,7 +320,7 @@ describe('the HAR redactor', () => {
     return {
       log: {
         version: '1.2',
-        creator: { name: 'browser-verified', version: '0.1.0' },
+        creator: { name: 'browser-verified-skill', version: '0.1.0' },
         pages: [],
         entries: [
           {

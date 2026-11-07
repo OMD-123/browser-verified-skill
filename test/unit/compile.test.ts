@@ -313,11 +313,11 @@ describe('the compiler', () => {
     expect(script).toContain("test('flow'");
   });
 
-  it('does not import browser-verified', () => {
+  it('does not import browser-verified-skill', () => {
     const script = renderScript(compileFlow(run()));
-    // The script mentions browser-verified in a comment, but it imports
+    // The script mentions browser-verified-skill in a comment, but it imports
     // nothing from it: the generated file runs in any Playwright project.
-    expect(script).not.toMatch(/from ['"]browser-verified/);
+    expect(script).not.toMatch(/from ['"]browser-verified-skill/);
     expect(script).not.toMatch(/from ['"].*bv\.mjs/);
   });
 

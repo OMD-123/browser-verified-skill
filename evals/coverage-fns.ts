@@ -16,7 +16,7 @@ const target = process.argv[2] ?? '';
 for (const [file, data] of Object.entries(raw)) {
   const normalised = file.replace(/\\/g, '/');
   if (!normalised.includes(target)) continue;
-  console.log(normalised.replace(/.*browser-verified\//, ''));
+  console.log(normalised.replace(/.*browser-verified-skill\//, ''));
   for (const [id, count] of Object.entries(data.f)) {
     if (count > 0) continue;
     const meta = data.fnMap[id];

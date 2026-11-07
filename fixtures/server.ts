@@ -1,5 +1,5 @@
 /**
- * Shared fixture server for browser-verified tests and demos.
+ * Shared fixture server for browser-verified-skill tests and demos.
  *
  * Plain Node http, no dependencies. Serves a set of pages under /pages/* that
  * exercise the behaviours the toolkit must handle: forms, iframes, shadow DOM,

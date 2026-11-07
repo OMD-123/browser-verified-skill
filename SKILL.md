@@ -1,5 +1,5 @@
 ---
-name: browser-verified
+name: browser-verified-skill
 description: >-
   Drive a browser with evidence. Use when a task needs a real browser — a
   login, a checkout, a form, a scrape, a screenshot — and the result has to
@@ -10,7 +10,7 @@ description: >-
   script you can put in CI.
 ---
 
-# browser-verified
+# browser-verified-skill
 
 `bv` is a browser driver where every action is checked and every run leaves
 evidence behind.

@@ -19,6 +19,6 @@ for (const [file, data] of Object.entries(raw)) {
     if (count > 0) continue;
     const statement = data.statementMap[id];
     if (statement === undefined) continue;
-    console.log(`${file.replace(/.*browser-verified./, '')}:${statement.start.line}`);
+    console.log(`${file.replace(/.*browser-verified-skill./, '')}:${statement.start.line}`);
   }
 }

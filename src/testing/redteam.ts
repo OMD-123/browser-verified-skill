@@ -206,10 +206,11 @@ export function runRedTeam(): RedTeamResult {
       continue;
     }
 
-    let caught = false;
+    let caught: boolean;
     try {
       caught = attack.check?.() === true;
     } catch {
+      // A check that throws has not caught anything.
       caught = false;
     }
     results.push({
