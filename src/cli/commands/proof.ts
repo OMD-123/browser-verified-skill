@@ -280,6 +280,26 @@ export function registerProof(program: Command): void {
       }
     });
 
+  // --- bv mcp -------------------------------------------------------------
+  program
+    .command('mcp')
+    .description('serve the browser tools over the Model Context Protocol (stdio)')
+    .action(async (cmd: Command) => {
+      const global = globalOptions(cmd);
+      try {
+        const { createMcpServer } = await import('../../mcp/wiring.js');
+        const server = await createMcpServer({ cwd: global.cwd });
+        // The MCP server speaks JSON-RPC over stdio. The banner goes to
+        // stderr, because stdout carries the protocol.
+        process.stderr.write('browser-verified MCP server ready on stdio\n');
+        await server.serve(process.stdin, process.stdout);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+
   // --- bv memory ---------------------------------------------------------
   const memory = program.command('memory').description('manage the site memory');
 

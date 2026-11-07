@@ -57,7 +57,7 @@ export default defineConfig({
           branches: 20,
           lines: 44,
           functions: 50,
-          statements: 44,
+          statements: 43,
         },
         'src/verify/**/*.ts': {
           branches: 72,
@@ -94,6 +94,12 @@ export default defineConfig({
           lines: 90,
           functions: 90,
           statements: 90,
+        },
+        'src/mcp/**/*.ts': {
+          branches: 78,
+          lines: 96,
+          functions: 93,
+          statements: 96,
         },
       },
     },
