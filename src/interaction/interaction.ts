@@ -238,11 +238,7 @@ async function typeWithTypos(
  * Returns the same character when there is no neighbour to pick.
  */
 export function neighbour(character: string, random: () => number): string {
-  const rows = [
-    'qwertyuiop',
-    'asdfghjkl',
-    'zxcvbnm',
-  ];
+  const rows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
   const lower = character.toLowerCase();
 
   for (const row of rows) {

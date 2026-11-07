@@ -106,6 +106,7 @@
     "@typescript-eslint/utils": "8.72.1",
     "@typescript-eslint/visitor-keys": "8.72.1",
     "@vitest/coverage-v8": "5.1.0",
+    "axe-core": "^4.11.0",
     "eslint": "10.14.0",
     "prettier": "3.9.10",
     "tsup": "9.0.0",

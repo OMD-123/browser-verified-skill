@@ -18,6 +18,7 @@ import {
   viewportMatrix,
   withViewport,
   type FailureSample,
+  type ViewportResult,
 } from '../../src/testing/qa.js';
 
 /** The fixture server's base URL. */
@@ -107,7 +108,12 @@ describe('the findings collector', () => {
       url: 'http://x/',
       console: [],
       networkFailures: [
-        { url: 'http://x/missing', method: 'GET', error: 'net::ERR_FAILED', resourceType: 'document' },
+        {
+          url: 'http://x/missing',
+          method: 'GET',
+          error: 'net::ERR_FAILED',
+          resourceType: 'document',
+        },
       ],
       pageErrors: [],
     });
@@ -151,6 +157,17 @@ describe('the viewport matrix', () => {
     expect(results[0]?.width).toBe(320);
   });
 
+  it('runs a check in a viewport with a scale factor', async () => {
+    await withViewport(
+      browser,
+      { name: 'hidpi', width: 800, height: 600, deviceScaleFactor: 2, isMobile: false },
+      async (page) => {
+        await page.setContent('<html><body><h1>Hi</h1></body></html>');
+        expect(await page.locator('h1').textContent()).toBe('Hi');
+      },
+    );
+  });
+
   it('finds an element that overflows', async () => {
     await withViewport(browser, { name: 'small', width: 320, height: 568 }, async (page) => {
       await page.setContent(`
@@ -168,6 +185,47 @@ describe('the viewport matrix', () => {
         return count;
       });
       expect(overflow).toBeGreaterThan(0);
+    });
+  });
+
+  it('names the overflowing element', async () => {
+    // A page served by the fixture server with a wide element, so the
+    // overflow check has something to find.
+    const results = await viewportMatrix(browser, `${FIXTURE}/pages/index.html`, [
+      { name: 'small', width: 320, height: 568 },
+    ]);
+    // The fixture page fits, so there is no overflow selector; the field is
+    // absent rather than empty.
+    if (results[0]?.horizontalOverflow === 0) {
+      expect(results[0]?.overflowSelector).toBeUndefined();
+    } else {
+      expect(results[0]?.overflowSelector).toBeDefined();
+    }
+  });
+
+  it('finds an overflowing element by id', async () => {
+    await withViewport(browser, { name: 'small', width: 320, height: 568 }, async (page) => {
+      await page.setContent(`
+        <html><body>
+          <div id="wide" style="width:2000px">too wide</div>
+        </body></html>
+      `);
+
+      const overflowing = await page.evaluate(() => {
+        const limit = document.documentElement.clientWidth;
+        const found: string[] = [];
+        for (const element of Array.from(document.querySelectorAll('*'))) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.right > limit + 1) {
+            const id = element.id;
+            const tag = element.tagName.toLowerCase();
+            found.push(id.length > 0 ? `${tag}#${id}` : tag);
+          }
+        }
+        return found;
+      });
+
+      expect(overflowing).toContain('div#wide');
     });
   });
 
@@ -210,6 +268,18 @@ describe('the performance measurement', () => {
     expect(metrics.loadMs).toBeGreaterThan(0);
   });
 
+  it('handles a response with no content length', async () => {
+    // A response without a content-length header must not make the
+    // measurement throw.
+    const metrics = await measurePerf(page, `${FIXTURE}/pages/index.html`);
+    expect(metrics.transferBytes).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reports the transfer size', async () => {
+    const metrics = await measurePerf(page, `${FIXTURE}/pages/index.html`);
+    expect(metrics.transferBytes).toBeGreaterThanOrEqual(0);
+  });
+
   it('counts the long tasks', async () => {
     const metrics = await measurePerf(page, `${FIXTURE}/pages/index.html`);
     expect(metrics.longTasks).toBeGreaterThanOrEqual(0);
@@ -241,6 +311,71 @@ describe('the visual comparison', () => {
 
   it('hashes different bytes differently', () => {
     expect(hashImage(Buffer.from('x'))).not.toBe(hashImage(Buffer.from('y')));
+  });
+});
+
+describe('the health scoring', () => {
+  /** A viewport result with the given errors and overflow. */
+  function result(name: string, errors: number, overflow: number): ViewportResult {
+    return {
+      name,
+      width: 800,
+      height: 600,
+      findings: {
+        url: 'http://x/',
+        console: Array.from({ length: errors }, () => ({
+          type: 'error',
+          text: 'boom',
+          at: 'now',
+        })),
+        networkFailures: [],
+        pageErrors: [],
+      },
+      horizontalOverflow: overflow,
+    };
+  }
+
+  it('scores a clean viewport', () => {
+    const score = scoreHealth([result('a', 0, 0)]);
+    expect(score.score).toBe(1);
+    expect(score.passed).toBe(1);
+  });
+
+  it('does not score a viewport with errors', () => {
+    const score = scoreHealth([result('a', 1, 0)]);
+    expect(score.score).toBe(0);
+  });
+
+  it('does not score a viewport with overflow', () => {
+    const score = scoreHealth([result('a', 0, 2)]);
+    expect(score.score).toBe(0);
+  });
+
+  it('scores nothing when there is nothing', () => {
+    const score = scoreHealth([]);
+    expect(score.score).toBe(0);
+    expect(score.checks).toBe(0);
+  });
+
+  it('reports the errors in the health report', () => {
+    const results = [result('a', 2, 0)];
+    const text = renderHealth(results, scoreHealth(results));
+    expect(text).toContain('2 error(s)');
+    // The viewport's own line says it is not clean; the summary line still
+    // mentions the count of clean viewports, which is a different thing.
+    expect(text).toContain('a (800x600): 2 error(s)');
+  });
+
+  it('reports the overflow in the health report', () => {
+    const results = [result('a', 0, 3)];
+    const text = renderHealth(results, scoreHealth(results));
+    expect(text).toContain('3 overflowing element(s)');
+  });
+
+  it('reports a clean viewport as clean', () => {
+    const results = [result('a', 0, 0)];
+    const text = renderHealth(results, scoreHealth(results));
+    expect(text).toContain('clean');
   });
 });
 

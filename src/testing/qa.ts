@@ -72,7 +72,13 @@ export class FindingsCollector {
         type: message.type(),
         text: message.text(),
         ...(location.url.length > 0
-          ? { location: { url: location.url, line: location.lineNumber, column: location.columnNumber } }
+          ? {
+              location: {
+                url: location.url,
+                line: location.lineNumber,
+                column: location.columnNumber,
+              },
+            }
           : {}),
         at: new Date().toISOString(),
       });
@@ -298,8 +304,7 @@ export async function measurePerf(page: Page, url: string): Promise<PerfMetrics>
 
   const timing = await page.evaluate(() => {
     const navigation = performance.getEntriesByType('navigation')[0] as
-      | PerformanceNavigationTiming
-      | undefined;
+      PerformanceNavigationTiming | undefined;
     let longTasks = 0;
     try {
       const entries = performance.getEntriesByType('longtask');
@@ -346,10 +351,7 @@ export interface VisualDiff {
  * "close enough" — a 0.1% difference is a difference, and this tool does
  * not decide that it does not matter.
  */
-export function compareVisual(
-  current: Buffer,
-  baseline: Buffer | undefined,
-): VisualDiff {
+export function compareVisual(current: Buffer, baseline: Buffer | undefined): VisualDiff {
   const currentHash = hashImage(current);
   const baselineHash = baseline === undefined ? undefined : hashImage(baseline);
   const match = baselineHash !== undefined && currentHash === baselineHash;
@@ -487,7 +489,9 @@ export function renderHealth(
   score: { score: number; checks: number; passed: number },
 ): string {
   const lines: string[] = [];
-  lines.push(`health: ${score.passed}/${score.checks} viewports clean (${Math.round(score.score * 100)}%)`);
+  lines.push(
+    `health: ${score.passed}/${score.checks} viewports clean (${Math.round(score.score * 100)}%)`,
+  );
   for (const result of results) {
     const errors = errorCount(result.findings);
     const notes: string[] = [];

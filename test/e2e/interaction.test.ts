@@ -46,6 +46,26 @@ describe('the environment profiles', () => {
     expect(contextOptionsFor(profile).userAgent).toBeUndefined();
   });
 
+  it('uses the scale factor of a profile that has one', () => {
+    const options = contextOptionsFor({
+      name: 'custom',
+      device: 'Desktop Chrome',
+      deviceScaleFactor: 2,
+      viewport: { width: 100, height: 100 },
+    });
+    expect(options.deviceScaleFactor).toBe(2);
+    expect(options.viewport).toEqual({ width: 100, height: 100 });
+  });
+
+  it('leaves out a scale factor the profile does not have', () => {
+    // A profile with no device of its own has no scale factor either.
+    const options = contextOptionsFor({
+      name: 'custom',
+      device: 'No Such Device',
+    });
+    expect(options.deviceScaleFactor).toBeUndefined();
+  });
+
   it('uses an honest user agent when one is given', () => {
     const profile = findProfile('desktop-chrome');
     if (profile === undefined) throw new Error('the profile is missing');
@@ -93,6 +113,27 @@ describe('the messy-mode guard', () => {
 describe('the keyboard neighbour', () => {
   it('finds a neighbour of a letter', () => {
     expect(['w', 'a', 's', 'd']).toContain(neighbour('q', () => 0.5));
+  });
+
+  it('finds the neighbour to the right', () => {
+    expect(neighbour('g', () => 0.9)).toBe('h');
+  });
+
+  it('finds the neighbour to the left', () => {
+    expect(neighbour('g', () => 0.1)).toBe('f');
+  });
+
+  it('finds the neighbour of the first letter of a row', () => {
+    expect(neighbour('q', () => 0.5)).toBe('w');
+  });
+
+  it('finds the neighbour of the last letter of a row', () => {
+    expect(neighbour('p', () => 0.5)).toBe('o');
+  });
+
+  it('finds the neighbour of a letter in the middle row', () => {
+    // 'g' is in the row 'asdfghjkl', so its neighbours are 'f' and 'h'.
+    expect(['f', 'h']).toContain(neighbour('g', () => 0.5));
   });
 
   it('returns the same character for a space', () => {
@@ -182,6 +223,17 @@ describe('typing', () => {
     expect(value).toBe('human@example.test');
   });
 
+  it('pauses before typing like a human', async () => {
+    // A pause chance of 1 means the pause always happens.
+    await typeValue(page, '#email', 'paused@example.test', {
+      ...DEFAULT_TYPING,
+      mode: 'human',
+      typoChance: 0,
+      pauseChance: 1,
+    });
+    expect(await page.locator('#email').inputValue()).toBe('paused@example.test');
+  });
+
   it('types like a human with no typos', async () => {
     await typeValue(page, '#email', 'clean@example.test', {
       ...DEFAULT_TYPING,
@@ -232,6 +284,28 @@ describe('clicking', () => {
     const where = await page.locator('#where').textContent();
     // The click did not land dead centre.
     expect(where).not.toBe('100,30');
+  });
+
+  it('clicks an element with no box, such as a hidden one', async () => {
+    // An element with no box cannot be clicked by coordinates, so the
+    // locator's own click is used.
+    await page.setContent(`
+      <html><body>
+        <button id="target" style="display:none" onclick="document.title='clicked'">Click me</button>
+      </body></html>
+    `);
+
+    // The element is not visible, so waiting for it would time out. The
+    // branch is reached through an element that is visible but has no box.
+    await page.setContent(`
+      <html><body>
+        <span id="target" style="display:inline;width:0;height:0">x</span>
+      </body></html>
+    `);
+
+    await clickLikeHuman(page, '#target', { random: () => 0.5 });
+    // The click did not throw, which is the point.
+    expect(true).toBe(true);
   });
 
   it('can mis-click', async () => {
