@@ -12,6 +12,11 @@ dist/
 bv-install-test/
 *.tgz
 
+# Secrets. `.env.example` is committed; a real .env never is.
+.env
+.env.*
+!.env.example
+
 # Coverage
 coverage/
 

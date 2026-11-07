@@ -55,6 +55,9 @@ jobs:
       - name: Verify the bundled CLI runs
         run: node scripts/bv.mjs --version
 
+      - name: Acceptance claims
+        run: npm run acceptance
+
   macos:
     name: best-effort (macOS)
     runs-on: macos-latest
