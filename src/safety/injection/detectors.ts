@@ -89,34 +89,62 @@ export function worstSeverity(findings: readonly Finding[]): FindingSeverity | u
  */
 export const DEFAULT_INSTRUCTION_PHRASES: readonly string[] = [
   // English
+  //
+  // The list is deliberately long and deliberately redundant. A phrase
+  // detector that only catches one wording of an attack is not a detector.
+  // The red-team suite in `test/redteam/guards.test.ts` is what keeps this
+  // list honest: every phrase there has to be caught by one of these.
   'ignore previous',
+  'ignore the previous',
+  'ignore any previous',
   'ignore all previous',
+  'ignore everything above',
   'ignore the above',
+  'ignore the instructions',
+  'ignore your instructions',
+  'ignore prior',
+  'ignore the prior',
   'disregard previous',
+  'disregard the previous',
   'disregard the above',
   'forget previous',
+  'forget the previous',
   'forget everything above',
+  'forget all',
   'system prompt',
   'your system prompt',
+  'the system prompt',
   'new instructions',
   'updated instructions',
+  'additional instructions',
   'you must now',
   'you should now',
+  'you must immediately',
+  'you must run',
+  'you are required to',
   'do not tell the user',
   "don't tell the user",
   'do not mention',
+  'do not inform the user',
   'without telling the user',
+  'without asking the user',
+  'without informing the user',
   'reveal the',
   'reveal your',
   'reveal secret',
+  'reveal your secret',
   'print your instructions',
+  'show your instructions',
   'send this page to',
   'send the page to',
+  'send the vault',
   'email this page to',
   'forward this page to',
   'post this to',
+  'post the vault',
   'exfiltrate',
   'click the link below',
+  'follow the link below',
   'approve this payment',
   'approve the following',
   'authorize this payment',
@@ -130,10 +158,12 @@ export const DEFAULT_INSTRUCTION_PHRASES: readonly string[] = [
   'override your instructions',
   'override previous',
   'act as the administrator',
+  'developer mode',
   'you are now',
   'your new role',
   'do not access',
   'bypass your',
+  'bypass the',
 ];
 
 /**
@@ -375,19 +405,53 @@ export function findExfiltrationUrls(text: string): ExfilHit[] {
   while ((match = urlPattern.exec(text)) !== null) {
     const url = match[0];
     const queryStart = url.indexOf('?');
-    if (queryStart === -1) continue;
-    const query = url.slice(queryStart + 1);
-    for (const part of query.split('&')) {
-      const eq = part.indexOf('=');
-      const key = (eq === -1 ? part : part.slice(0, eq)).toLowerCase();
-      if (EXFIL_KEYS.some((k) => key === k || key.includes(k))) {
-        hits.push({ url, key, index: match.index });
-        break;
+    if (queryStart !== -1) {
+      const query = url.slice(queryStart + 1);
+      for (const part of query.split('&')) {
+        const eq = part.indexOf('=');
+        const key = (eq === -1 ? part : part.slice(0, eq)).toLowerCase();
+        if (EXFIL_KEYS.some((k) => key === k || key.includes(k))) {
+          hits.push({ url, key, index: match.index });
+          break;
+        }
       }
+      continue;
+    }
+
+    // A URL with no query is still an exfiltration channel when the text
+    // around it says what to do with it. A bare URL is not enough on its
+    // own — that would flag every link on the page.
+    const context = text.slice(Math.max(0, match.index - 80), match.index).toLowerCase();
+    if (EXFIL_CONTEXT.some((phrase) => context.includes(phrase))) {
+      hits.push({ url, key: 'context', index: match.index });
     }
   }
   return hits;
 }
+
+/**
+ * The phrases that make a bare URL an exfiltration channel.
+ *
+ * The phrase has to be near the URL, so an ordinary link on a page that
+ * happens to mention "send" is not flagged.
+ */
+export const EXFIL_CONTEXT: readonly string[] = [
+  'post the',
+  'post this',
+  'post your',
+  'send the',
+  'send this',
+  'send your',
+  'upload the',
+  'upload your',
+  'submit the',
+  'submit your',
+  'exfiltrate',
+  'collect the',
+  'forward the',
+  'email the',
+  'email this',
+];
 
 // ---------------------------------------------------------------------------
 // Suspicious hidden field names
