@@ -1,0 +1,23 @@
+{
+  "name": "fixture smoke tests",
+  "checks": [
+    {
+      "name": "the index page loads",
+      "url": "http://127.0.0.1:3000/pages/index.html",
+      "expect": { "type": "url_matches", "pattern": "/pages/index" },
+      "tags": ["smoke"]
+    },
+    {
+      "name": "the login page has a sign-in heading",
+      "url": "http://127.0.0.1:3000/pages/login.html",
+      "expect": { "type": "text_visible", "text": "Sign in" },
+      "tags": ["smoke", "login"]
+    },
+    {
+      "name": "a check that is meant to fail",
+      "url": "http://127.0.0.1:3000/pages/index.html",
+      "expect": { "type": "text_visible", "text": "This is not on the page" },
+      "tags": ["negative"]
+    }
+  ]
+}

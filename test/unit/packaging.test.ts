@@ -48,6 +48,11 @@ describe('the published artifact', () => {
       'memory',
       'diff',
       'report',
+      'test',
+      'redteam',
+      'discover-api',
+      'research',
+      'audit',
     ]) {
       expect(stdout, `the help does not mention "${command}"`).toContain(command);
     }

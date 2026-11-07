@@ -27,9 +27,94 @@ import {
   type ObservedRequest,
 } from '../../testing/discover.js';
 import { renderResearch, research, type ResearchQuestion } from '../../testing/research.js';
+import { parseSuite, renderSuite, runSuite } from '../../testing/suite.js';
+import { renderRedTeam, runRedTeam } from '../../testing/redteam.js';
 
 /** Register the QA commands. */
 export function registerQa(program: Command): void {
+  // --- bv test -------------------------------------------------------------
+  program
+    .command('test')
+    .description('run a suite of checks against a site')
+    .option('--suite <file>', 'the suite JSON file')
+    .option('--tag <tag>', 'only run checks with this tag (repeatable)', collect)
+    .option('--out <file>', 'write the result to this file')
+    .action(async (options: { suite?: string; tag?: string[]; out?: string }, cmd: Command) => {
+      const global = globalOptions(cmd);
+      if (options.suite === undefined) {
+        const message = 'bv test needs --suite <file>';
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+
+      try {
+        const raw = await readFile(absPath(options.suite, global.cwd), 'utf8');
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          throw new UsageError(`the suite file is not valid JSON: ${detail}`);
+        }
+
+        const suite = parseSuite(parsed);
+
+        const browser = await launchChromium();
+        let result: Awaited<ReturnType<typeof runSuite>>;
+        try {
+          result = await runSuite(browser, suite, {
+            ...(options.tag !== undefined ? { tags: options.tag } : {}),
+          });
+        } finally {
+          await browser.close();
+        }
+
+        const text = renderSuite(result);
+        if (options.out !== undefined) {
+          const path = absPath(options.out, global.cwd);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, text, 'utf8');
+        }
+
+        emit(
+          cmd,
+          result.failed === 0 ? ok(result, [text]) : fail(result, [text], EXIT.VERIFICATION_FAILED),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const code = err instanceof UsageError ? EXIT.USAGE : EXIT.FAILURE;
+        emit(cmd, fail({ error: message }, [message], code));
+      }
+    });
+
+  // --- bv redteam ----------------------------------------------------------
+  program
+    .command('redteam')
+    .description("test the tool's own guards against known attacks")
+    .argument('[action]', 'run (the only action for now)', 'run')
+    .action((action: string, cmd: Command) => {
+      const global = globalOptions(cmd);
+      if (action !== 'run') {
+        const message = `unknown redteam action "${action}". The only action is "run".`;
+        emit(cmd, fail({ error: message }, [message], EXIT.USAGE));
+        return;
+      }
+
+      try {
+        const result = runRedTeam();
+        emit(
+          cmd,
+          result.failed === 0
+            ? ok(result, [renderRedTeam(result)])
+            : fail(result, [renderRedTeam(result)], EXIT.VERIFICATION_FAILED),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emit(cmd, fail({ error: message }, [message], EXIT.FAILURE));
+      }
+      void global;
+    });
+
   // --- bv diff ------------------------------------------------------------
   program
     .command('diff')
@@ -229,6 +314,13 @@ export function registerQa(program: Command): void {
         emit(cmd, fail({ error: message }, [message], code));
       }
     });
+}
+
+/**
+ * Collect a repeatable option into an array.
+ */
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
 }
 
 /**
