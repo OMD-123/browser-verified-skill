@@ -160,18 +160,31 @@ Firefox and WebKit are optional per the brief and are not installed or
 tested. The locator chain, the ARIA snapshot and the diffing are all
 verified against Chromium only.
 
-## Coverage thresholds are per-directory
+## Coverage thresholds are per-directory, and they are not lowered to make a run pass
 
-See `docs/DECISIONS.md` (D-0031). The security-critical directory
-(`src/safety/**`) requires 100% branch coverage and meets it. The other
-directories carry their own thresholds, which are set to what the code
-actually achieves today and are raised as later phases add tests. The
-global ≥85% figure from the brief applies to the finished project, not to
-a partially built one.
+The security-critical directory (`src/safety/**`) requires 100% branch
+coverage and meets it. The other directories carry their own thresholds,
+which are set to what the code actually achieves and are raised as tests
+are added.
+
+The rule is that a threshold is never lowered to make a failing run
+pass. When coverage falls, the fix is a test, not a smaller number. See
+`docs/DECISIONS.md` (D-0031).
+
+`src/testing/**` is the lowest of the directories that are not
+security-critical, at 73% branches. The uncovered part is the
+browser-driven paths that need a purpose-built fixture, and a fixture that
+does not exist cannot be tested by assertion. The number is in
+`vitest.config.ts`, so it is visible rather than implied.
+
+The global ≥85% figure applies to the finished project. The project is not
+finished: the agent loop's `bv run` entry point, the A/B eval harness and
+a live model provider are not built, and their absence is recorded in the
+section above.
 
 ## The `evaluate` callback in the inspector is not instrumented
 
 The browser-side callback in `src/safety/inspect.ts` runs inside the
 browser, so the coverage tool cannot see it. It is excluded with a `v8
 ignore` comment. The rules it feeds live in `src/safety/element-facts.ts`,
-where they are covered — see `docs/DECISIONS.md` (D-0033).
+where they are covered.

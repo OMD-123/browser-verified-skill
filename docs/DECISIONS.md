@@ -1,7 +1,9 @@
 # Architecture decisions
 
 Each entry records a non-trivial decision: what was chosen, what was rejected, and why.
-Newest first.
+
+The entries are in the order they were made, so the numbering is the
+chronology. The most recent ones (D-0030 onward) are at the end.
 
 ---
 
@@ -675,3 +677,85 @@ packaged artifact.
 **Consequence.** `src/core/daemon-entry.ts` and the `--daemon` path in
 `src/cli/main.ts` are two entry points for the same code. They must stay in
 sync; both delegate to `runDaemonProcess`.
+
+**Amendment (Phase 7).** The bundle path was resolved against the _source_
+layout (`../../../scripts/bv.mjs`), which does not exist in an installed
+package — the bundle lives at
+`node_modules/browser-verified/scripts/bv.mjs`. The daemon entry is now
+found from `import.meta.url`, which is the running file wherever it was
+installed. This was caught by installing the tarball and running it, not by
+any test in the repository: every other test passed.
+
+---
+
+## D-0035 — The safety gate is inside the agent loop, not above it
+
+**Decision.** `src/agent/loop.ts` calls `evaluateAction` for every action the
+model proposes. There is no "agent mode" that relaxes the checks, and no path
+through the loop that skips them.
+
+**Alternatives rejected.** A separate, looser gate for Mode B: the whole point
+of the gate is that there is one policy engine, and two would mean one of them
+is the one that gets relaxed. A gate above the loop, wrapping it: the model
+would propose a batch of actions and the gate would judge them as a batch,
+which loses the per-action reasoning — including _why_ one action in the batch
+was refused.
+
+**Reason.** The failure mode this project cares about is a model that decides
+to do something it should not. If the gate is above the loop, the loop is the
+thing that has to decide what is safe, and it is the thing that got confused.
+Putting the gate inside means the confusion cannot help: the refusal happens
+where the action happens.
+
+**Consequence.** The loop needs a gate input that the CLI's `act` handler
+also builds, so both paths see the same thing. The target descriptor is
+parsed into its parts — `role=button name="Sign in"` becomes a role and a
+name — because the classifier needs the role to tell a navigation from a
+submit. Getting this wrong made every click classify as an unknown submit,
+so every click needed an approval.
+
+---
+
+## D-0036 — A non-interactive session asks for an approval; it does not deny it
+
+**Decision.** When an action needs approval and the session cannot prompt,
+the evaluator returns `needs_approval`, not `deny`. The operator resolves it
+out of band: `bv approve <id>` in another terminal, then retry with the
+token.
+
+**Alternatives rejected.** Denying, as the evaluator originally did. The
+approval store, the `bv approve` command and the one-time token all existed;
+the evaluator simply refused to reach them in a headless session. That made
+the approval mechanism unusable in exactly the situation it exists for — a CI
+run, an overnight job, anything without a person at the keyboard.
+
+**Reason.** A denial says "do not do this". `needs_approval` says "do not do
+this without a human's say-so". The second is what was meant, and the
+distinction is the difference between a refusal and a question.
+
+**Consequence.** The exit code for a headless approval request is 4, the same
+as for an interactive one. The refusal message says the session is
+non-interactive and that the approval must come out of band, so the operator
+is not left guessing why nothing is prompting.
+
+---
+
+## D-0037 — A skill is data, and an untrusted skill is marked before it is read
+
+**Decision.** Skills are markdown files with a frontmatter block, read at
+runtime. A skill whose frontmatter says `untrusted: true` is rendered with a
+marker _before_ its body. The gate does not read skills.
+
+**Alternatives rejected.** Skills as code, so they could be type-checked: a
+skill that says "the button is at `#login`" does not need a type checker, and
+making it code would mean a rebuild for every correction. Rendering untrusted
+skills without a marker: the agent would read a page's instructions as if
+they were the operator's.
+
+**Reason.** The person who knows a site should be able to fix the skill
+without a rebuild, and a skill that came from the web should never be
+indistinguishable from one the operator wrote.
+
+**Consequence.** A broken skill is skipped, not fatal — one bad file does not
+stop the agent from using the good ones — and the failures are reported so
+they can be fixed.
