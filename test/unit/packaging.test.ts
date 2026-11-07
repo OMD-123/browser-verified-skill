@@ -26,8 +26,23 @@ describe('the published artifact', () => {
   });
 
   it('runs and prints its version', async () => {
+    // The version is read from the manifest rather than hardcoded, so a
+    // release bump does not silently break the test.
+    const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
+      version: string;
+    };
+
     const { stdout } = await exec(process.execPath, [join(ROOT, 'scripts', 'bv.mjs'), '--version']);
-    expect(stdout.trim()).toContain('0.1.0');
+    expect(stdout.trim()).toContain(manifest.version);
+  });
+
+  it('reports the same version in the manifest and the bundle', async () => {
+    const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
+      version: string;
+    };
+
+    const { stdout } = await exec(process.execPath, [join(ROOT, 'scripts', 'bv.mjs'), '--version']);
+    expect(stdout.trim()).toBe(manifest.version);
   });
 
   it('lists every command', async () => {

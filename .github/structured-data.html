@@ -7,17 +7,23 @@
         "@id": "https://github.com/OMD-123/browser-verified#software",
         "name": "browser-verified",
         "alternateName": "bv",
-        "description": "Browser automation with evidence: diffed snapshots, prompt-injection defenses, compiled Playwright scripts, and self-healing locators.",
+        "description": "Browser automation with evidence. An open-source Agent Skill that lets an AI agent drive a real browser while every action passes a policy gate, every run leaves an auditable artifact, and the run compiles into a plain Playwright script that replays for free.",
         "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Browser Automation",
         "operatingSystem": "Linux, macOS, Windows",
-        "softwareVersion": "0.1.0",
+        "softwareVersion": "1.0.0",
+        "softwareRequirements": "Node.js 20+",
+        "memoryRequirements": "2 GB",
         "license": "https://opensource.org/licenses/MIT",
         "codeRepository": "https://github.com/OMD-123/browser-verified",
+        "issueTracker": "https://github.com/OMD-123/browser-verified/issues",
         "programmingLanguage": {
           "@type": "ComputerLanguage",
           "name": "TypeScript"
         },
         "runtimePlatform": "Node.js 20+",
+        "downloadUrl": "https://www.npmjs.com/package/browser-verified",
+        "installUrl": "npm install -g browser-verified",
         "author": {
           "@type": "Person",
           "name": "Om Dandagvhal",
@@ -35,18 +41,61 @@
         },
         "featureList": [
           "Accessibility-tree diffing to cut LLM token cost",
-          "Machine-checked success conditions with screenshot and network evidence",
+          "Machine-checked success conditions with screenshot, snapshot and network evidence",
           "Compilation of a run into a plain Playwright TypeScript script",
+          "Deterministic replay at zero LLM cost",
           "Self-healing locator chains with drift reporting",
-          "Prompt-injection detection with a nonce-tagged untrusted-content envelope",
-          "Taint tracking across page, network, file and model boundaries",
-          "Policy engine with an approval gate and plan-lock",
+          "Prompt-injection detection across 12 techniques",
+          "Taint tracking from page to sensitive sink",
+          "Policy engine with an approval gate and a plan-lock",
+          "One-time approval tokens bound to an exact action",
           "AES-256-GCM secrets vault with redaction at every sink",
-          "Network dry-run that intercepts state-changing requests",
+          "Network dry-run that reports exactly what would be sent",
           "robots.txt compliance, per-domain rate limiting and human handoff",
-          "Model Context Protocol server exposing the same policy engine"
+          "Model Context Protocol server exposing the same policy engine",
+          "Red-team suite that attacks the tool's own guards"
         ],
-        "keywords": "browser automation, playwright, AI agent, prompt injection, self-healing tests, evidence, MCP, web scraping, visual regression"
+        "keywords": "browser automation, playwright, AI agent, agent skill, prompt injection defense, self-healing locators, test automation, evidence, audit trail, reproducible, MCP, model context protocol, web scraping, visual regression, accessibility testing, e2e testing, flaky test detection, QA automation, CI/CD, headless browser, TypeScript, Chrome DevTools Protocol, axe-core",
+        "audience": {
+          "@type": "Audience",
+          "audienceType": "Software Developers"
+        },
+        "isAccessibleForFree": true
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": "https://github.com/OMD-123/browser-verified#source",
+        "name": "browser-verified",
+        "description": "Source code for browser-verified: browser automation with evidence, built as an Agent Skill.",
+        "codeRepository": "https://github.com/OMD-123/browser-verified",
+        "programmingLanguage": "TypeScript",
+        "runtimePlatform": "Node.js 20+",
+        "license": "https://opensource.org/licenses/MIT",
+        "author": {
+          "@type": "Person",
+          "name": "Om Dandagvhal",
+          "url": "https://github.com/OMD-123"
+        }
+      },
+      {
+        "@type": "TechArticle",
+        "@id": "https://github.com/OMD-123/browser-verified#article",
+        "headline": "Browser automation with evidence: diffed snapshots, a policy gate, and compiled Playwright scripts",
+        "description": "How browser-verified turns a single AI-agent browser exploration into an auditable, replayable, zero-cost CI test — and why the safety gate lives inside the agent loop rather than above it.",
+        "articleSection": "Engineering",
+        "inLanguage": "en",
+        "wordCount": 3500,
+        "author": {
+          "@type": "Person",
+          "name": "Om Dandagvhal",
+          "url": "https://github.com/OMD-123"
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "OMD-123",
+          "url": "https://github.com/OMD-123"
+        },
+        "isAccessibleForFree": true
       },
       {
         "@type": "FAQPage",
@@ -54,10 +103,26 @@
         "mainEntity": [
           {
             "@type": "Question",
+            "name": "What is browser-verified?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "browser-verified is an open-source browser-automation toolkit built as an Agent Skill. An AI agent drives a real browser through it, while every action passes through a policy engine, a plan-lock, a taint tracker and a prompt-injection guard. Every run leaves an auditable artifact behind and can be compiled into a plain Playwright script that replays deterministically at zero LLM cost. The CLI is called bv."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What problem does browser-verified solve?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It solves three problems that browser-automation tools usually leave open. First, 'it worked' becomes provable: a run produces a diffed accessibility-tree snapshot, an audit log, and a success condition checked against the live page, so an unverified run is reported as unverified rather than done. Second, re-running stops costing money: bv compile turns a run into a plain Playwright script and bv replay runs it deterministically with no model in the loop. Third, a changed page stops breaking the script: a recorded locator fallback chain repairs broken steps, and bv drift reports every change so a repair can be reviewed."
+            }
+          },
+          {
+            "@type": "Question",
             "name": "Does browser-verified need an API key?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No, not for its primary mode. Mode A is host-driven: a host agent such as Claude Code calls bv commands itself, and bv needs no LLM and no API key. Mode B (bv run --goal) is the optional autonomous planner/executor/verifier loop and does require ANTHROPIC_API_KEY. Without a key, Mode B exits with a clear error and Mode A is unaffected."
+              "text": "No, not for its primary mode. Mode A is host-driven: a host agent such as Claude Code calls bv commands itself, and bv needs no LLM and no API key. Mode B, where a model decides what to do next inside the agent loop, is the optional autonomous path and needs one. bv doctor reports exactly which keys are present and which capabilities are therefore unavailable, and Mode A is unaffected either way."
             }
           },
           {
@@ -65,7 +130,7 @@
             "name": "Is browser-verified a stealth browser?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. browser-verified deliberately implements no stealth, fingerprint-spoofing, CAPTCHA-solving or proxy-rotation capability. The user agent is honest (BrowserVerified/<version> (+<contact-url>)), navigator.webdriver is not masked, and a policy that requests any of those capabilities fails to load with a clear error. CAPTCHA, login-wall and 2FA challenges trigger a human handoff instead of being solved."
+              "text": "No, and this is enforced rather than merely documented. browser-verified implements no stealth, fingerprint-spoofing, CAPTCHA-solving or proxy-rotation capability. The user agent is honest and carries a contact URL you control, navigator.webdriver is not masked, and a policy that requests any of those capabilities fails to load with an error naming the key and the reason. CAPTCHA, login-wall and 2FA challenges trigger a human handoff instead of being solved."
             }
           },
           {
@@ -73,7 +138,15 @@
             "name": "How does browser-verified protect against prompt injection?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "All page-derived text is wrapped in a per-call nonce envelope before it reaches a model: <untrusted_web_content origin=\"...\" nonce=\"<16 hex>\"> ... </untrusted_web_content nonce=\"<same>\">. The nonce is regenerated per call and forged closing tags are escaped. Detectors flag hidden text, aria-hidden content, HTML comments, zero-width and bidi characters, poisoned alt/title/aria-label/placeholder attributes, CSS content:, fake system banners, base64 blobs and exfiltration-style URLs. A finding of severity review requires approval before acting on the node; severity block redacts the node's text."
+              "text": "With two independent mechanisms. The injection scanner looks for twelve techniques: instruction phrases, bidirectional-text overrides, zero-width characters, instructions in HTML comments, instructions in attributes, fake system banners, base64 blobs, exfiltration URLs, urgency and authority framing, role-play framing, hidden elements and CSS content. Separately, taint tracking marks any value read from the page and refuses to let a tainted value reach a sensitive sink such as a payment field, a message recipient or a URL — and the taint survives derivation, so it cannot be laundered by being reformatted. Findings attach to every action and block it."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is the prompt-injection guard a security boundary?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No, and the project says so in its own documentation. The guard is a speed bump and an evidence source, not a trust boundary. It detects the patterns it knows, so a novel phrasing may pass. The project measures this with a red-team suite of sixteen known attacks run by bv redteam run; when that suite found six payloads that got through, they were fixed and published rather than quietly patched. The suite is a regression test, not a proof — a payload that is not in the catalogue has not been tried."
             }
           },
           {
@@ -81,15 +154,7 @@
             "name": "What does browser-verified actually verify?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Every run ends with a success condition from a small DSL: url_matches, text_visible, element, network_response, storage, or compositions of all, any and not. Deterministic conditions are evaluated in-process with no model call. The run then produces evidence: a final screenshot, the full snapshot, per-condition results and network facts. A run that does not satisfy the condition is reported as unverified, never as done."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "How does browser-verified reduce LLM token cost?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "It returns a structural diff of the page's accessibility tree rather than the whole tree. Nodes are matched on role, accessible name and a stable ref, with a loose-identity fallback so a ref change after a navigation is reported as a change instead of a removal plus an addition. Long sibling runs are collapsed, long text is truncated with an explicit marker, and a token budget can be applied. On the project's fixture signup form, a one-field fill produces a diff under 15 percent of the full tree size."
+              "text": "Three separate things. That an action happened: the audit log and the snapshot diff record it. That the page reached a state: bv verify evaluates a success condition against the live page using a small deterministic DSL covering URL matches, visible text, element presence, network responses and storage state, with all, any and not composition. And that the guards held: bv redteam run attacks the tool's own safety layer. A run that does not satisfy its success condition is reported as unverified, never as done."
             }
           },
           {
@@ -97,7 +162,7 @@
             "name": "What does the compiled Playwright script look like?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "bv compile <runId> --out flows/x.spec.ts emits a readable TypeScript file that imports playwright directly and has no runtime dependency on bv. Named variables become parameters, the best locator is emitted first with fallbacks as comments, and assertions are inferred from observed post-conditions such as a URL change, a new dialog or toast, or a count delta, while skipping volatile values like timestamps and IDs. bv replay runs it deterministically at zero LLM cost."
+              "text": "A readable TypeScript file that imports only @playwright/test and has no runtime dependency on browser-verified. Named variables become parameters, the best locator is emitted first with its recorded fallbacks as comments, and assertions are inferred from observed post-conditions such as a URL change, a toast, or a count delta, while skipping volatile values like timestamps and generated IDs. The result runs in any Playwright project, with no daemon, no API key and no tokens."
             }
           },
           {
@@ -105,7 +170,7 @@
             "name": "How does self-healing work in browser-verified?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Every action records which locator strategy succeeded, following the chain ref, role plus name, label, text, test-id, CSS. When a locator fails, the fallback chain runs. If it still fails, Mode A returns a structured failure to the host agent and Mode B asks the model to fix only that step. A successful heal updates the intermediate representation, recompiles the flow and emits a drift entry such as Step 4: #login to button[name=signin]. The bv drift command lists them."
+              "text": "Every element is located through a recorded fallback chain in a fixed order: ref, role plus accessible name, label, text, test id, then CSS. The order goes from most semantic to most brittle, so a page that regenerates its class names but keeps its accessible name still resolves. When the primary locator breaks, bv replay --heal walks the chain, updates the recorded locator, recompiles the flow and emits a drift entry. bv drift lists every such change, so the repair is reported rather than silent."
             }
           },
           {
@@ -113,7 +178,7 @@
             "name": "Is browser-verified compatible with the Model Context Protocol?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. The bv mcp command exposes snapshot, act, verify, extract, compile and replay over MCP. The MCP path runs the same policy engine as the CLI, so no MCP route can bypass a policy check."
+              "text": "Yes. bv mcp serves snapshot, act, approve, verify, extract, compile and replay over MCP on stdio. The MCP path goes through the same daemon and the same policy engine as the CLI, so there is no route through MCP that skips a check: a submit action is refused over MCP exactly as it is on the command line."
             }
           },
           {
@@ -121,7 +186,7 @@
             "name": "What are browser-verified's known limitations?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "The prompt-injection guard is heuristic and will miss novel attacks; the project measures this against a 25-plus page red-team pack and publishes the misses. The rewind command restores cookies, storage state and navigation but cannot restore in-page JavaScript state or server-side state. Trace redaction is text substitution and can miss secrets embedded in binary resources. Token counts in the benchmark table are estimates using characters divided by four unless an API key is present to count them exactly."
+              "text": "The prompt-injection guard is heuristic and will miss novel attacks, and the project publishes the measured misses rather than hiding them. A compromised host agent can still act, because the gate records that a human approved an action but cannot tell whether that human read it. Time-travel restores the browser's place, not the moment, so it cannot undo a server-side state change. Trace redaction is text substitution and can miss secrets embedded in binary resources. The vault protects secrets at rest, not while they are in use. robots.txt is advisory rather than an access control. And Chromium is the only tested browser."
             }
           },
           {
@@ -129,7 +194,15 @@
             "name": "Where does browser-verified store its data?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Everything runtime lives in a .bv directory in the current working directory, which is gitignored. It contains policy.yaml, the AES-256-GCM encrypted vault.enc, a playbooks.sqlite site-memory database, and a runs directory holding audit.jsonl, trace.zip, network.har, result.json and per-step artifacts. Nothing under .bv should ever be committed."
+              "text": "Everything runtime lives in a .bv directory in the current working directory, which is gitignored. It contains policy.yaml, the AES-256-GCM encrypted vault.enc, the site-memory database, your skills, and a runs directory holding audit.jsonl, the per-step snapshot and diff artifacts, network facts and storage state. Nothing under .bv should ever be committed."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I install browser-verified?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Run npm install -g browser-verified, then npx playwright install chromium, then bv doctor to confirm the environment. Node.js 20 or newer is required, and macOS, Linux and Windows are supported. From source, clone the repository, run npm install, npx playwright install chromium, then npm run verify:all for typecheck, lint, tests and the build, and npm run acceptance for the seventeen end-to-end claims."
             }
           }
         ]

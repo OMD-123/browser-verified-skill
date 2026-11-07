@@ -129,7 +129,7 @@ export async function createMcpServer(options: McpOptions): Promise<McpServer> {
 
   return new McpServer(registry, BROWSER_TOOLS, {
     name: options.name ?? 'browser-verified',
-    version: options.version ?? '0.1.0',
+    version: options.version ?? '1.0.0',
   });
 }
 

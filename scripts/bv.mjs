@@ -2046,7 +2046,7 @@ async function createMcpServer(options) {
   };
   return new McpServer(registry2, BROWSER_TOOLS, {
     name: options.name ?? "browser-verified",
-    version: options.version ?? "0.1.0"
+    version: options.version ?? "1.0.0"
   });
 }
 async function checkDaemon(cwd) {
@@ -8780,9 +8780,10 @@ async function run(argv) {
     if (err instanceof CommanderError) {
       const code = mapCommanderError(err);
       if (err.code === "commander.help") program.outputHelp();
+      const printedByCommander = err.code === "commander.help" || err.code === "commander.version";
       result = {
         data: { error: "UsageError", message: err.message, reasons: [] },
-        lines: err.code === "commander.help" ? [] : [err.message],
+        lines: printedByCommander ? [] : [err.message],
         code
       };
     } else {

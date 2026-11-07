@@ -112,11 +112,13 @@ export async function run(argv: readonly string[]): Promise<number> {
   } catch (err) {
     if (err instanceof CommanderError) {
       const code = mapCommanderError(err);
-      // `commander.help` (no subcommand) prints the help text itself.
+      // Commander prints the help text and the version itself before
+      // throwing, so they must not be printed a second time here.
       if (err.code === 'commander.help') program.outputHelp();
+      const printedByCommander = err.code === 'commander.help' || err.code === 'commander.version';
       result = {
         data: { error: 'UsageError', message: err.message, reasons: [] },
-        lines: err.code === 'commander.help' ? [] : [err.message],
+        lines: printedByCommander ? [] : [err.message],
         code,
       };
     } else {
