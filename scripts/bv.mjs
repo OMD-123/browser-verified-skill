@@ -176,9 +176,219 @@ var init_paths = __esm({
   }
 });
 
+// src/safety/policy.ts
+import { z } from "zod";
+import YAML from "yaml";
+import { mkdir as mkdir2, readFile, writeFile as writeFile2 } from "fs/promises";
+import { dirname as dirname2 } from "path";
+function defaultPolicy() {
+  return PolicySchema.parse({
+    version: 1,
+    domains: { allow: [], deny: [] },
+    ownedOrigins: [],
+    actionClasses: {
+      approvalRequired: ["submit", "destructive", "financial", "messaging", "upload"],
+      deny: []
+    },
+    budgets: {
+      maxSteps: 80,
+      maxRetriesPerStep: 2,
+      maxSeconds: 600,
+      maxTokens: 2e5
+    },
+    rate: { maxRpsPerDomain: 1, jitterMs: [300, 1200] },
+    compliance: {
+      respectRobots: true,
+      userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
+      captcha: "human_handoff",
+      evalReadonly: false
+    },
+    secrets: { maskInLogs: true },
+    memory: { ttlDays: 30 }
+  });
+}
+function messageOf(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+async function loadPolicy(cwd = process.cwd()) {
+  const path = policyPath(cwd);
+  let raw;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return defaultPolicy();
+  }
+  let parsed;
+  try {
+    parsed = YAML.parse(raw);
+  } catch (err) {
+    throw new Error(`the policy at ${path} is not valid YAML: ${messageOf(err)}`, {
+      cause: err
+    });
+  }
+  try {
+    return validatePolicy(parsed);
+  } catch (err) {
+    throw new Error(`the policy at ${path} is not valid: ${messageOf(err)}`, {
+      cause: err
+    });
+  }
+}
+function rejectForbiddenKeys(raw) {
+  if (typeof raw !== "object" || raw === null) return;
+  const walk = (node, path) => {
+    if (typeof node !== "object" || node === null) return;
+    if (Array.isArray(node)) {
+      node.forEach((item, i) => walk(item, `${path}[${i}]`));
+      return;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      const keyPath = path === "" ? key : `${path}.${key}`;
+      const forbidden = FORBIDDEN_KEYS.find((f) => f.key.toLowerCase() === key.toLowerCase());
+      if (forbidden !== void 0) {
+        throw new Error(
+          `policy key "${keyPath}" is not allowed: ${forbidden.because}. browser-verified-skill does not implement these capabilities and will not accept a policy that asks for them.`
+        );
+      }
+      walk(value, keyPath);
+    }
+  };
+  walk(raw, "");
+}
+function validatePolicy(raw) {
+  rejectForbiddenKeys(raw);
+  const result = PolicySchema.safeParse(raw);
+  if (result.success) return result.data;
+  const issues = result.error.issues.map((issue) => ({
+    path: issue.path.join(".") || "(root)",
+    message: issue.message
+  }));
+  const details = issues.map((i) => `  - ${i.path}: ${i.message}`).join("\n");
+  throw new PolicyLoadError(`invalid policy:
+${details}`, issues);
+}
+var ACTION_CLASSES, URL_MARKER, DomainSchema, ActionClassesSchema, BudgetsSchema, RateSchema, ComplianceSchema, SecretsSchema, LlmSchema, MemorySchema, PolicySchema, FORBIDDEN_KEYS, PolicyLoadError;
+var init_policy = __esm({
+  "src/safety/policy.ts"() {
+    "use strict";
+    init_paths();
+    ACTION_CLASSES = [
+      "read",
+      "navigate",
+      "input",
+      "submit",
+      "destructive",
+      "financial",
+      "messaging",
+      "download",
+      "upload"
+    ];
+    URL_MARKER = "@url:";
+    DomainSchema = z.array(z.string().min(1));
+    ActionClassesSchema = z.object({
+      /** Classes that require an explicit approval. */
+      approvalRequired: z.array(z.enum(ACTION_CLASSES)).default([]),
+      /** Classes that are always denied. */
+      deny: z.array(z.enum(ACTION_CLASSES)).default([])
+    }).strict();
+    BudgetsSchema = z.object({
+      maxSteps: z.number().int().positive().default(80),
+      maxRetriesPerStep: z.number().int().min(0).default(2),
+      maxSeconds: z.number().int().positive().default(600),
+      maxTokens: z.number().int().positive().default(2e5)
+    }).strict();
+    RateSchema = z.object({
+      maxRpsPerDomain: z.number().positive().default(1),
+      /** The jitter window in milliseconds. */
+      jitterMs: z.tuple([z.number().int().min(0), z.number().int().min(0)]).default([300, 1200])
+    }).strict();
+    ComplianceSchema = z.object({
+      /** Respect robots.txt. */
+      respectRobots: z.boolean().default(true),
+      /** The honest user-agent suffix, including a contact URL. */
+      userAgentSuffix: z.string().default("BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)"),
+      /** What to do when a challenge is detected. */
+      captcha: z.enum(["human_handoff", "deny"]).default("human_handoff"),
+      /** Allow `eval-readonly`. Off by default: it is the most powerful primitive. */
+      evalReadonly: z.boolean().default(false)
+    }).strict();
+    SecretsSchema = z.object({
+      /** Mask secret values in logs, audit and JSON output. */
+      maskInLogs: z.boolean().default(true)
+    }).strict();
+    LlmSchema = z.object({
+      /** The model used for each tier. */
+      tiers: z.object({
+        nav: z.string().min(1),
+        plan: z.string().min(1),
+        verify: z.string().min(1)
+      }).strict(),
+      /** How many times the executor may escalate from `nav` to `plan`. */
+      maxEscalations: z.number().int().min(0).default(2)
+    }).strict();
+    MemorySchema = z.object({
+      /** How long a playbook entry stays valid, in days. */
+      ttlDays: z.number().int().positive().default(30)
+    }).strict();
+    PolicySchema = z.object({
+      version: z.literal(1),
+      domains: z.object({
+        allow: DomainSchema.default([]),
+        deny: DomainSchema.default([])
+      }).strict().default({ allow: [], deny: [] }),
+      /** Origins the operator owns. */
+      ownedOrigins: z.array(z.string().min(1)).default([]),
+      actionClasses: ActionClassesSchema.default({
+        approvalRequired: ["submit", "destructive", "financial", "messaging", "upload"],
+        deny: []
+      }),
+      budgets: BudgetsSchema.default({
+        maxSteps: 80,
+        maxRetriesPerStep: 2,
+        maxSeconds: 600,
+        maxTokens: 2e5
+      }),
+      rate: RateSchema.default({ maxRpsPerDomain: 1, jitterMs: [300, 1200] }),
+      compliance: ComplianceSchema.default({
+        respectRobots: true,
+        userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
+        captcha: "human_handoff",
+        evalReadonly: false
+      }),
+      secrets: SecretsSchema.default({ maskInLogs: true }),
+      llm: LlmSchema.optional(),
+      memory: MemorySchema.default({ ttlDays: 30 })
+    }).strict();
+    FORBIDDEN_KEYS = [
+      { key: "stealth", because: "fingerprint spoofing and bot-detection evasion are out of scope" },
+      { key: "fingerprint", because: "fingerprint spoofing is out of scope" },
+      { key: "userAgentRandomize", because: "the user agent must be honest" },
+      { key: "randomizeUserAgent", because: "the user agent must be honest" },
+      { key: "captchaSolver", because: "CAPTCHA solving is out of scope; use a human handoff" },
+      { key: "solveCaptcha", because: "CAPTCHA solving is out of scope; use a human handoff" },
+      { key: "proxyPool", because: "rotating proxy pools are out of scope" },
+      { key: "proxyRotation", because: "rotating proxy pools are out of scope" },
+      { key: "proxies", because: "rotating proxy pools are out of scope" },
+      { key: "credentialStuffing", because: "credential stuffing is out of scope" },
+      { key: "massAccountCreation", because: "mass account creation is out of scope" },
+      { key: "webdriverMasking", because: "navigator.webdriver masking is out of scope" },
+      { key: "bypassWaf", because: "bypassing a WAF is out of scope" },
+      { key: "bypassPaywall", because: "bypassing a paywall is out of scope" }
+    ];
+    PolicyLoadError = class extends Error {
+      issues;
+      constructor(message, issues = []) {
+        super(message);
+        this.name = "PolicyLoadError";
+        this.issues = issues;
+      }
+    };
+  }
+});
+
 // src/core/daemon-info.ts
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { readFile as readFile2, writeFile as writeFile3 } from "fs/promises";
+import { readFile as readFile3, writeFile as writeFile4 } from "fs/promises";
 function hashToken(token) {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
@@ -196,7 +406,7 @@ async function writeDaemonInfo(info, token, cwd) {
 }
 async function readDaemonInfo(cwd) {
   try {
-    const raw = await readFile2(daemonInfoPath(cwd), "utf8");
+    const raw = await readFile3(daemonInfoPath(cwd), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.port !== "number" || typeof parsed.tokenHash !== "string") {
       return void 0;
@@ -208,7 +418,7 @@ async function readDaemonInfo(cwd) {
 }
 async function readDaemonToken(cwd) {
   try {
-    return (await readFile2(daemonTokenPath(cwd), "utf8")).trim();
+    return (await readFile3(daemonTokenPath(cwd), "utf8")).trim();
   } catch {
     return void 0;
   }
@@ -432,216 +642,6 @@ async function locate(page, target, options = {}) {
 var init_locate = __esm({
   "src/actions/locate.ts"() {
     "use strict";
-  }
-});
-
-// src/safety/policy.ts
-import { z } from "zod";
-import YAML from "yaml";
-import { mkdir as mkdir3, readFile as readFile3, writeFile as writeFile4 } from "fs/promises";
-import { dirname as dirname4 } from "path";
-function defaultPolicy() {
-  return PolicySchema.parse({
-    version: 1,
-    domains: { allow: [], deny: [] },
-    ownedOrigins: [],
-    actionClasses: {
-      approvalRequired: ["submit", "destructive", "financial", "messaging", "upload"],
-      deny: []
-    },
-    budgets: {
-      maxSteps: 80,
-      maxRetriesPerStep: 2,
-      maxSeconds: 600,
-      maxTokens: 2e5
-    },
-    rate: { maxRpsPerDomain: 1, jitterMs: [300, 1200] },
-    compliance: {
-      respectRobots: true,
-      userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
-      captcha: "human_handoff",
-      evalReadonly: false
-    },
-    secrets: { maskInLogs: true },
-    memory: { ttlDays: 30 }
-  });
-}
-function messageOf(err) {
-  return err instanceof Error ? err.message : String(err);
-}
-async function loadPolicy(cwd = process.cwd()) {
-  const path = policyPath(cwd);
-  let raw;
-  try {
-    raw = await readFile3(path, "utf8");
-  } catch {
-    return defaultPolicy();
-  }
-  let parsed;
-  try {
-    parsed = YAML.parse(raw);
-  } catch (err) {
-    throw new Error(`the policy at ${path} is not valid YAML: ${messageOf(err)}`, {
-      cause: err
-    });
-  }
-  try {
-    return validatePolicy(parsed);
-  } catch (err) {
-    throw new Error(`the policy at ${path} is not valid: ${messageOf(err)}`, {
-      cause: err
-    });
-  }
-}
-function rejectForbiddenKeys(raw) {
-  if (typeof raw !== "object" || raw === null) return;
-  const walk = (node, path) => {
-    if (typeof node !== "object" || node === null) return;
-    if (Array.isArray(node)) {
-      node.forEach((item, i) => walk(item, `${path}[${i}]`));
-      return;
-    }
-    for (const [key, value] of Object.entries(node)) {
-      const keyPath = path === "" ? key : `${path}.${key}`;
-      const forbidden = FORBIDDEN_KEYS.find((f) => f.key.toLowerCase() === key.toLowerCase());
-      if (forbidden !== void 0) {
-        throw new Error(
-          `policy key "${keyPath}" is not allowed: ${forbidden.because}. browser-verified-skill does not implement these capabilities and will not accept a policy that asks for them.`
-        );
-      }
-      walk(value, keyPath);
-    }
-  };
-  walk(raw, "");
-}
-function validatePolicy(raw) {
-  rejectForbiddenKeys(raw);
-  const result = PolicySchema.safeParse(raw);
-  if (result.success) return result.data;
-  const issues = result.error.issues.map((issue) => ({
-    path: issue.path.join(".") || "(root)",
-    message: issue.message
-  }));
-  const details = issues.map((i) => `  - ${i.path}: ${i.message}`).join("\n");
-  throw new PolicyLoadError(`invalid policy:
-${details}`, issues);
-}
-var ACTION_CLASSES, URL_MARKER, DomainSchema, ActionClassesSchema, BudgetsSchema, RateSchema, ComplianceSchema, SecretsSchema, LlmSchema, MemorySchema, PolicySchema, FORBIDDEN_KEYS, PolicyLoadError;
-var init_policy = __esm({
-  "src/safety/policy.ts"() {
-    "use strict";
-    init_paths();
-    ACTION_CLASSES = [
-      "read",
-      "navigate",
-      "input",
-      "submit",
-      "destructive",
-      "financial",
-      "messaging",
-      "download",
-      "upload"
-    ];
-    URL_MARKER = "@url:";
-    DomainSchema = z.array(z.string().min(1));
-    ActionClassesSchema = z.object({
-      /** Classes that require an explicit approval. */
-      approvalRequired: z.array(z.enum(ACTION_CLASSES)).default([]),
-      /** Classes that are always denied. */
-      deny: z.array(z.enum(ACTION_CLASSES)).default([])
-    }).strict();
-    BudgetsSchema = z.object({
-      maxSteps: z.number().int().positive().default(80),
-      maxRetriesPerStep: z.number().int().min(0).default(2),
-      maxSeconds: z.number().int().positive().default(600),
-      maxTokens: z.number().int().positive().default(2e5)
-    }).strict();
-    RateSchema = z.object({
-      maxRpsPerDomain: z.number().positive().default(1),
-      /** The jitter window in milliseconds. */
-      jitterMs: z.tuple([z.number().int().min(0), z.number().int().min(0)]).default([300, 1200])
-    }).strict();
-    ComplianceSchema = z.object({
-      /** Respect robots.txt. */
-      respectRobots: z.boolean().default(true),
-      /** The honest user-agent suffix, including a contact URL. */
-      userAgentSuffix: z.string().default("BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)"),
-      /** What to do when a challenge is detected. */
-      captcha: z.enum(["human_handoff", "deny"]).default("human_handoff"),
-      /** Allow `eval-readonly`. Off by default: it is the most powerful primitive. */
-      evalReadonly: z.boolean().default(false)
-    }).strict();
-    SecretsSchema = z.object({
-      /** Mask secret values in logs, audit and JSON output. */
-      maskInLogs: z.boolean().default(true)
-    }).strict();
-    LlmSchema = z.object({
-      /** The model used for each tier. */
-      tiers: z.object({
-        nav: z.string().min(1),
-        plan: z.string().min(1),
-        verify: z.string().min(1)
-      }).strict(),
-      /** How many times the executor may escalate from `nav` to `plan`. */
-      maxEscalations: z.number().int().min(0).default(2)
-    }).strict();
-    MemorySchema = z.object({
-      /** How long a playbook entry stays valid, in days. */
-      ttlDays: z.number().int().positive().default(30)
-    }).strict();
-    PolicySchema = z.object({
-      version: z.literal(1),
-      domains: z.object({
-        allow: DomainSchema.default([]),
-        deny: DomainSchema.default([])
-      }).strict().default({ allow: [], deny: [] }),
-      /** Origins the operator owns. */
-      ownedOrigins: z.array(z.string().min(1)).default([]),
-      actionClasses: ActionClassesSchema.default({
-        approvalRequired: ["submit", "destructive", "financial", "messaging", "upload"],
-        deny: []
-      }),
-      budgets: BudgetsSchema.default({
-        maxSteps: 80,
-        maxRetriesPerStep: 2,
-        maxSeconds: 600,
-        maxTokens: 2e5
-      }),
-      rate: RateSchema.default({ maxRpsPerDomain: 1, jitterMs: [300, 1200] }),
-      compliance: ComplianceSchema.default({
-        respectRobots: true,
-        userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
-        captcha: "human_handoff",
-        evalReadonly: false
-      }),
-      secrets: SecretsSchema.default({ maskInLogs: true }),
-      llm: LlmSchema.optional(),
-      memory: MemorySchema.default({ ttlDays: 30 })
-    }).strict();
-    FORBIDDEN_KEYS = [
-      { key: "stealth", because: "fingerprint spoofing and bot-detection evasion are out of scope" },
-      { key: "fingerprint", because: "fingerprint spoofing is out of scope" },
-      { key: "userAgentRandomize", because: "the user agent must be honest" },
-      { key: "randomizeUserAgent", because: "the user agent must be honest" },
-      { key: "captchaSolver", because: "CAPTCHA solving is out of scope; use a human handoff" },
-      { key: "solveCaptcha", because: "CAPTCHA solving is out of scope; use a human handoff" },
-      { key: "proxyPool", because: "rotating proxy pools are out of scope" },
-      { key: "proxyRotation", because: "rotating proxy pools are out of scope" },
-      { key: "proxies", because: "rotating proxy pools are out of scope" },
-      { key: "credentialStuffing", because: "credential stuffing is out of scope" },
-      { key: "massAccountCreation", because: "mass account creation is out of scope" },
-      { key: "webdriverMasking", because: "navigator.webdriver masking is out of scope" },
-      { key: "bypassWaf", because: "bypassing a WAF is out of scope" },
-      { key: "bypassPaywall", because: "bypassing a paywall is out of scope" }
-    ];
-    PolicyLoadError = class extends Error {
-      issues;
-      constructor(message, issues = []) {
-        super(message);
-        this.name = "PolicyLoadError";
-        this.issues = issues;
-      }
-    };
   }
 });
 
@@ -5976,6 +5976,7 @@ import { join as join3 } from "path";
 import { homedir as homedir2 } from "os";
 init_exit();
 init_paths();
+init_policy();
 
 // src/cli/helpers.ts
 var rootProgram;
@@ -6079,14 +6080,27 @@ async function runDoctor(cwd) {
     () => true,
     () => false
   );
-  checks.push(
-    policyExists ? { name: "policy", status: "ok", detail: policy } : {
+  if (!policyExists) {
+    checks.push({
       name: "policy",
       status: "warn",
       detail: "no policy file: the default policy will be used",
       fix: "bv init"
+    });
+  } else {
+    try {
+      await loadPolicy(cwd);
+      checks.push({ name: "policy", status: "ok", detail: policy });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      checks.push({
+        name: "policy",
+        status: "fail",
+        detail: `the policy is not valid: ${message}`,
+        fix: "fix the policy, or delete it and run `bv init` to write the default"
+      });
     }
-  );
+  }
   const hasKey = Boolean(process.env["ANTHROPIC_API_KEY"]);
   checks.push({
     name: "anthropic-key",
@@ -6139,14 +6153,14 @@ function registerDoctor(program) {
 }
 
 // src/cli/commands/init.ts
-import { copyFile, mkdir as mkdir2, readFile, writeFile as writeFile2 } from "fs/promises";
+import { copyFile, mkdir as mkdir3, readFile as readFile2, writeFile as writeFile3 } from "fs/promises";
 import { existsSync as existsSync2 } from "fs";
-import { dirname as dirname2, resolve as resolve3 } from "path";
+import { dirname as dirname3, resolve as resolve3 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 init_exit();
 init_paths();
 function packagedPolicyPath() {
-  const here = dirname2(fileURLToPath2(import.meta.url));
+  const here = dirname3(fileURLToPath2(import.meta.url));
   const candidates = [
     resolve3(here, "..", "..", "..", "policies", "default.yaml"),
     resolve3(here, "..", "..", "..", "..", "policies", "default.yaml"),
@@ -6159,15 +6173,15 @@ function packagedPolicyPath() {
 }
 async function runInit(cwd) {
   const root = bvRoot(cwd);
-  await mkdir2(runsRoot(cwd), { recursive: true });
+  await mkdir3(runsRoot(cwd), { recursive: true });
   const policy = policyPath(cwd);
   let policyCreated = false;
-  const existing = await readFile(policy, "utf8").catch(() => void 0);
+  const existing = await readFile2(policy, "utf8").catch(() => void 0);
   if (existing === void 0) {
     const packaged = packagedPolicyPath();
-    const content = await readFile(packaged, "utf8").catch(() => void 0);
+    const content = await readFile2(packaged, "utf8").catch(() => void 0);
     if (content === void 0) {
-      await writeFile2(
+      await writeFile3(
         policy,
         [
           "version: 1",
@@ -6231,14 +6245,14 @@ function registerInit(program) {
 import { spawn } from "child_process";
 import { existsSync as existsSync3 } from "fs";
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { dirname as dirname3, resolve as resolve4 } from "path";
+import { dirname as dirname4, resolve as resolve4 } from "path";
 init_exit();
 init_client();
 init_daemon_info();
 init_paths();
 init_errors();
 function daemonEntry() {
-  const here = dirname3(fileURLToPath3(import.meta.url));
+  const here = dirname4(fileURLToPath3(import.meta.url));
   const sourceEntry = resolve4(here, "..", "..", "core", "daemon-entry.ts");
   const tsxCli = resolve4(here, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs");
   if (existsSync3(sourceEntry)) {

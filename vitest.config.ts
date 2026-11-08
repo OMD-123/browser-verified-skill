@@ -42,10 +42,10 @@ export default defineConfig({
           statements: 90,
         },
         'src/actions/**/*.ts': {
-          branches: 44,
-          lines: 50,
-          functions: 44,
-          statements: 50,
+          branches: 50,
+          lines: 60,
+          functions: 52,
+          statements: 60,
         },
         'src/core/**/*.ts': {
           branches: 41,
@@ -54,10 +54,10 @@ export default defineConfig({
           statements: 50,
         },
         'src/cli/**/*.ts': {
-          branches: 22,
-          lines: 45,
-          functions: 49,
-          statements: 45,
+          branches: 42,
+          lines: 64,
+          functions: 68,
+          statements: 63,
         },
         'src/verify/**/*.ts': {
           branches: 72,

@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { ok, fail, type CommandResult } from '../../core/output.js';
 import { EXIT } from '../../core/exit.js';
 import { bvRoot, policyPath } from '../../core/paths.js';
+import { loadPolicy } from '../../safety/policy.js';
 import { emit } from '../helpers.js';
 
 /** The outcome of a single doctor check. */
@@ -119,16 +120,32 @@ export async function runDoctor(cwd: string): Promise<DoctorCheck[]> {
     () => true,
     () => false,
   );
-  checks.push(
-    policyExists
-      ? { name: 'policy', status: 'ok', detail: policy }
-      : {
-          name: 'policy',
-          status: 'warn',
-          detail: 'no policy file: the default policy will be used',
-          fix: 'bv init',
-        },
-  );
+
+  if (!policyExists) {
+    checks.push({
+      name: 'policy',
+      status: 'warn',
+      detail: 'no policy file: the default policy will be used',
+      fix: 'bv init',
+    });
+  } else {
+    // The policy is VALIDATED, not just found. A policy with a typo or a
+    // forbidden key used to be reported as "ok" here and then fail at
+    // runtime with a confusing error, when the doctor is exactly where the
+    // user would have been told about it.
+    try {
+      await loadPolicy(cwd);
+      checks.push({ name: 'policy', status: 'ok', detail: policy });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      checks.push({
+        name: 'policy',
+        status: 'fail',
+        detail: `the policy is not valid: ${message}`,
+        fix: 'fix the policy, or delete it and run `bv init` to write the default',
+      });
+    }
+  }
 
   // --- Anthropic key (Mode B only) -----------------------------------------
   const hasKey = Boolean(process.env['ANTHROPIC_API_KEY']);

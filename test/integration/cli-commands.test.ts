@@ -5,13 +5,15 @@
  * command's own logic, which is what the coverage report was missing.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { registerProof } from '../../src/cli/commands/proof.js';
 import { registerSafety } from '../../src/cli/commands/safety.js';
 import { registerQa } from '../../src/cli/commands/qa.js';
+import { registerSession } from '../../src/cli/commands/session.js';
+import { registerPerception } from '../../src/cli/commands/perception.js';
 import { setRootProgram } from '../../src/cli/helpers.js';
 import { connectDaemon, type DaemonClient } from '../../src/core/client.js';
 import type { readRun as ReadRunType } from '../../src/core/runstore/store.js';
@@ -64,6 +66,8 @@ async function run(cwd: string, args: string[]): Promise<Captured> {
   registerProof(program);
   registerSafety(program);
   registerQa(program);
+  registerSession(program);
+  registerPerception(program);
 
   let stdout = '';
   let stderr = '';
@@ -377,6 +381,294 @@ describe('the CLI command modules', () => {
 
     const result = await run(dir, ['approve', 'action-1']);
     expect(result.stdout).toContain('no pending action');
+  });
+
+  // --- bv session ---------------------------------------------------------
+
+  it('says no session is running', async () => {
+    // No daemon info file, so there is nothing to stop.
+    const result = await run(dir, ['session', 'stop']);
+    expect(result.stdout).toContain('no session');
+  });
+
+  it('reports that no session is running', async () => {
+    const result = await run(dir, ['session', 'status']);
+    expect(result.stdout).toContain('no session');
+  });
+
+  it('reports the status of a running session', async () => {
+    await mkdir(join(dir, '.bv'), { recursive: true });
+    await writeFile(
+      join(dir, '.bv', 'daemon.json'),
+      JSON.stringify({
+        port: 12345,
+        tokenHash: 'abc',
+        pid: process.pid,
+        session: 'default',
+        headed: true,
+        startedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      'utf8',
+    );
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        url: 'https://x.test/',
+        title: 'A page',
+        userAgent: 'BrowserVerifiedSkill/1.0',
+      }),
+    );
+
+    const result = await run(dir, ['session', 'status']);
+    expect(result.stdout).toContain('running: yes');
+    expect(result.stdout).toContain('headed: yes');
+    expect(result.stdout).toContain('https://x.test/');
+    expect(result.stdout).toContain('A page');
+  });
+
+  it('reports a stale session as not running', async () => {
+    await mkdir(join(dir, '.bv'), { recursive: true });
+    await writeFile(
+      join(dir, '.bv', 'daemon.json'),
+      JSON.stringify({
+        port: 12345,
+        tokenHash: 'abc',
+        // A pid that cannot be alive.
+        pid: 0,
+        session: 'default',
+        headed: false,
+        startedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      'utf8',
+    );
+
+    const result = await run(dir, ['session', 'status']);
+    expect(result.stdout).toContain('stale');
+  });
+
+  it('clears the state of a stale session when it stops', async () => {
+    await mkdir(join(dir, '.bv'), { recursive: true });
+    await writeFile(
+      join(dir, '.bv', 'daemon.json'),
+      JSON.stringify({
+        port: 12345,
+        tokenHash: 'abc',
+        pid: 0,
+        session: 'default',
+        headed: false,
+        startedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      'utf8',
+    );
+
+    const result = await run(dir, ['session', 'stop']);
+    expect(result.stdout).toContain('no longer running');
+  });
+
+  // --- bv snapshot ---------------------------------------------------------
+
+  it('takes a snapshot', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        diff: '+ main[e1]',
+        snapshotPath: '/tmp/snapshot.txt',
+        estimatedTokens: 12,
+        tree: 'main[e1]',
+      }),
+    );
+
+    const result = await run(dir, ['snapshot']);
+    expect(result.stdout).toContain('+ main[e1]');
+    expect(result.stdout).toContain('estimated tokens');
+  });
+
+  it('takes a full snapshot', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        diff: '+ main[e1]',
+        snapshotPath: '/tmp/snapshot.txt',
+        estimatedTokens: 12,
+        tree: 'main[e1]\n  button[e2] Sign in',
+      }),
+    );
+
+    const result = await run(dir, ['snapshot', '--full']);
+    expect(result.stdout).toContain('button[e2]');
+  });
+
+  it('rejects a non-positive token budget', async () => {
+    const result = await run(dir, ['snapshot', '--max-tokens', '0']);
+    expect(result.stdout).toContain('--max-tokens');
+  });
+
+  // --- bv act --------------------------------------------------------------
+
+  it('rejects an unknown action kind', async () => {
+    const result = await run(dir, ['act', 'teleport', '#a']);
+    expect(result.stdout).toContain('unknown action kind');
+  });
+
+  it('does a dry run without touching the daemon', async () => {
+    const result = await run(dir, ['act', 'click', 'role=button name="Go"', '--dry-run']);
+    expect(result.stdout).toContain('dry run');
+  });
+
+  it('reports a refusal with its rule ids', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        denied: true,
+        next: 'off_plan',
+        actionClass: 'submit',
+        reasons: ['the action is outside the plan'],
+        ruleIds: ['plan.off_plan.origin'],
+      }),
+    );
+
+    const result = await run(dir, ['act', 'click', '#a']);
+    expect(result.stdout).toContain('outside the plan');
+    expect(result.stdout).toContain('plan.off_plan.origin');
+  });
+
+  it('reports an approval that is needed', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        denied: true,
+        next: 'needs_approval',
+        actionClass: 'submit',
+        reasons: ['the "submit" action class requires approval'],
+        ruleIds: ['policy.approval.required.submit'],
+        approvalId: 'action-1',
+      }),
+    );
+
+    const result = await run(dir, ['act', 'click', '#a']);
+    expect(result.stdout).toContain('approval id');
+    expect(result.stdout).toContain('action-1');
+  });
+
+  // --- bv goto -------------------------------------------------------------
+
+  it('navigates', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({ ok: true, message: 'navigated', url: 'https://x.test/' }),
+    );
+
+    const result = await run(dir, ['goto', 'https://x.test/']);
+    expect(result.stdout).toContain('navigated');
+    expect(result.stdout).toContain('https://x.test/');
+  });
+
+  // --- bv tab --------------------------------------------------------------
+
+  it('lists the tabs', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        tabs: [
+          { index: 0, active: true, title: 'One', url: 'https://one.test/', popup: false },
+          { index: 1, active: false, title: '', url: 'https://two.test/', popup: true },
+        ],
+      }),
+    );
+
+    const result = await run(dir, ['tab']);
+    expect(result.stdout).toContain('One');
+    expect(result.stdout).toContain('[popup]');
+  });
+
+  it('says when there are no tabs', async () => {
+    mockedConnect.mockResolvedValue(mockClient({ tabs: [] }));
+
+    const result = await run(dir, ['tab']);
+    expect(result.stdout).toContain('no tabs');
+  });
+
+  it('needs an index to select a tab', async () => {
+    const result = await run(dir, ['tab', 'select']);
+    expect(result.stdout).toContain('tab index');
+  });
+
+  it('rejects an unknown tab action', async () => {
+    const result = await run(dir, ['tab', 'frobnicate']);
+    expect(result.stdout).toContain('unknown tab action');
+  });
+
+  // --- bv research ---------------------------------------------------------
+
+  it('needs a questions file and a sources file', async () => {
+    const result = await run(dir, ['research']);
+    expect(result.stdout).toContain('--questions');
+    expect(result.stdout).toContain('--sources');
+  });
+
+  it('rejects a questions file that is not a list', async () => {
+    await writeFile(join(dir, 'questions.json'), JSON.stringify('nope'), 'utf8');
+    await writeFile(join(dir, 'sources.txt'), 'https://x.test/\n', 'utf8');
+    const result = await run(dir, [
+      'research',
+      '--questions',
+      'questions.json',
+      '--sources',
+      'sources.txt',
+    ]);
+    expect(result.stdout).toContain('questions file must be a list');
+  });
+
+  it('rejects a question that is neither a string nor an object', async () => {
+    await writeFile(join(dir, 'questions.json'), JSON.stringify([42]), 'utf8');
+    await writeFile(join(dir, 'sources.txt'), 'https://x.test/\n', 'utf8');
+    const result = await run(dir, [
+      'research',
+      '--questions',
+      'questions.json',
+      '--sources',
+      'sources.txt',
+    ]);
+    expect(result.stdout).toContain('every question must be a string');
+  });
+
+  it('rejects an object with no question field', async () => {
+    await writeFile(join(dir, 'questions.json'), JSON.stringify([{ id: 'a' }]), 'utf8');
+    await writeFile(join(dir, 'sources.txt'), 'https://x.test/\n', 'utf8');
+    const result = await run(dir, [
+      'research',
+      '--questions',
+      'questions.json',
+      '--sources',
+      'sources.txt',
+    ]);
+    expect(result.stdout).toContain('every question must be a string');
+  });
+
+  it('accepts a list of plain strings', async () => {
+    await writeFile(join(dir, 'questions.json'), JSON.stringify(['what is it?']), 'utf8');
+    await writeFile(join(dir, 'sources.txt'), 'https://x.test/\n', 'utf8');
+    const result = await run(dir, [
+      'research',
+      '--questions',
+      'questions.json',
+      '--sources',
+      'sources.txt',
+    ]);
+    // It gets past the parsing, so the failure is about the source rather
+    // than the questions.
+    expect(result.stdout).not.toContain('questions file must be a list');
+    expect(result.stdout).not.toContain('every question must be a string');
+  });
+
+  it('accepts an object with a questions list', async () => {
+    await writeFile(
+      join(dir, 'questions.json'),
+      JSON.stringify({ questions: [{ question: 'what is it?', id: 'q1' }] }),
+      'utf8',
+    );
+    await writeFile(join(dir, 'sources.txt'), 'https://x.test/\n', 'utf8');
+    const result = await run(dir, [
+      'research',
+      '--questions',
+      'questions.json',
+      '--sources',
+      'sources.txt',
+    ]);
+    expect(result.stdout).not.toContain('questions file must be a list');
   });
 
   // --- bv diff ------------------------------------------------------------

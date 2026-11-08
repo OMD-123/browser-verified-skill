@@ -29,6 +29,7 @@
  * the binding is already there.
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -39,7 +40,7 @@ const require = createRequire(import.meta.url);
  * Returns undefined for a platform `rolldown` does not publish a binding
  * for, in which case there is nothing to install.
  */
-function bindingFor(platform, arch) {
+export function bindingFor(platform, arch) {
   if (platform === 'darwin') {
     return arch === 'arm64' ? '@rolldown/binding-darwin-arm64' : '@rolldown/binding-darwin-x64';
   }
@@ -65,10 +66,14 @@ function bindingFor(platform, arch) {
   }
 
   if (platform === 'linux') {
-    // glibc and musl are the two Linux ABIs. The default is glibc; musl
-    // is detected by the absence of a runtime glibc version.
-    const report = process.report?.getReport?.();
-    const isMusl = report?.header?.glibcVersionRuntime === undefined;
+    // glibc and musl are the two Linux ABIs.
+    //
+    // The detection has to match rolldown's own, because it is the thing
+    // that decides which binding to load. rolldown tries three sources in
+    // order: the filesystem, then the process report, then `ldd`. The
+    // report check is only conclusive when it finds a glibc version or a
+    // shared object named `libc.musl-*`; anything else falls through.
+    const isMusl = detectMusl();
 
     if (arch === 'arm64') {
       return isMusl ? '@rolldown/binding-linux-arm64-musl' : '@rolldown/binding-linux-arm64-gnu';
@@ -80,6 +85,56 @@ function bindingFor(platform, arch) {
   }
 
   return undefined;
+}
+
+/**
+ * Whether this Linux uses musl rather than glibc.
+ *
+ * The three sources, in the order rolldown tries them:
+ *
+ *  1. `/usr/bin/ldd` — its contents mention `musl`.
+ *  2. The process report — a glibc version means glibc; a shared object
+ *     named `libc.musl-*` means musl.
+ *  3. `ldd --version` — its output mentions `musl`.
+ *
+ * The default is glibc. That is the right default: a source that cannot
+ * tell the difference is far more likely to be glibc, and installing the
+ * wrong binding fails loudly while the right one works silently.
+ */
+export function detectMusl() {
+  // 1. The filesystem.
+  try {
+    const ldd = readFileSync('/usr/bin/ldd', 'utf-8');
+    if (ldd.includes('musl')) return true;
+  } catch {
+    // Not readable; try the next source.
+  }
+
+  // 2. The process report.
+  try {
+    if (process.report && typeof process.report.getReport === 'function') {
+      process.report.excludeNetwork = true;
+      const report = process.report.getReport();
+      if (report?.header?.glibcVersionRuntime) return false;
+      const shared = report?.sharedObjects;
+      if (Array.isArray(shared)) {
+        if (shared.some((name) => name.includes('libc.musl-') || name.includes('ld-musl-'))) {
+          return true;
+        }
+      }
+      // A report with no glibc version and no musl object is not
+      // conclusive, so fall through rather than guessing.
+    }
+  } catch {
+    // Fall through.
+  }
+
+  // 3. `ldd --version`.
+  try {
+    return execFileSync('ldd', ['--version'], { encoding: 'utf8' }).includes('musl');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -105,7 +160,7 @@ function packageManager() {
   return 'npm';
 }
 
-function main() {
+export function main() {
   const binding = bindingFor(process.platform, process.arch);
 
   if (binding === undefined) {
@@ -136,4 +191,7 @@ function main() {
   }
 }
 
-main();
+// Run when executed directly, not when imported by a test.
+if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}`) {
+  main();
+}
