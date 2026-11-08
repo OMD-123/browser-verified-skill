@@ -9,7 +9,7 @@ import type { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { ok, fail } from '../../core/output.js';
 import { EXIT } from '../../core/exit.js';
-import { connectDaemon } from '../../core/client.js';
+import { connectDaemon, createApproverClient } from '../../core/client.js';
 import { emit, globalOptions } from '../helpers.js';
 import { UsageError } from '../../core/errors.js';
 import { absPath } from '../../core/paths.js';
@@ -146,18 +146,95 @@ export function registerSafety(program: Command): void {
     );
 
   // --- bv approve --------------------------------------------------------
+  // --- bv approvals ------------------------------------------------------
+  program
+    .command('approvals')
+    .description('list the actions waiting for a human approval')
+    .action(async (_options: unknown, cmd: Command) => {
+      const global = globalOptions(cmd);
+      try {
+        const client = await connectDaemon(global.cwd);
+        const payload = await client.call<{
+          waiting: {
+            actionId: string;
+            description: string;
+            code: string;
+            createdAt: number;
+          }[];
+        }>('approve.waiting');
+
+        if (payload.waiting.length === 0) {
+          emit(cmd, ok({ waiting: [] }, ['nothing is waiting for approval']));
+          return;
+        }
+
+        const lines: string[] = [];
+        for (const entry of payload.waiting) {
+          lines.push(`${entry.code}  ${entry.actionId}`);
+          lines.push(`      ${entry.description}`);
+          lines.push(`      approve: bv approve ${entry.actionId} --code ${entry.code}`);
+        }
+
+        emit(cmd, ok({ waiting: payload.waiting }, lines));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emit(cmd, fail({ error: message }, [message], EXIT.FAILURE));
+      }
+    });
+
   program
     .command('approve')
     .description('approve a pending action and print a one-time token')
     .argument('<actionId>', 'the action id from the refusal')
-    .action(async (actionId: string, cmd: Command) => {
+    .option('--code <code>', 'the one-time code shown on the controlling terminal')
+    .action(async (actionId: string, options: { code?: string }, cmd: Command) => {
       const global = globalOptions(cmd);
       try {
-        const client = await connectDaemon(global.cwd);
-        const payload = await client.call<{ ok: boolean; token: string; description: string }>(
-          'approve.issue',
-          { actionId },
-        );
+        // The CODE channel comes first, and it needs no credential. The
+        // human reads a short code from the terminal that started the
+        // daemon and enters it. The code IS the human's proof: it is
+        // shown on the controlling terminal, which the agent's process
+        // cannot write to or read.
+        if (options.code !== undefined) {
+          const client = await connectDaemon(global.cwd);
+          const viaCode = await client.call<{ ok: boolean; token: string; description: string }>(
+            'approve.code',
+            { code: options.code },
+          );
+          if (!viaCode.ok) {
+            emit(
+              cmd,
+              fail(
+                { error: 'that code is not valid, or it has expired' },
+                ['that code is not valid, or it has expired'],
+                EXIT.FAILURE,
+              ),
+            );
+            return;
+          }
+          emit(
+            cmd,
+            ok(viaCode, [
+              `approved: ${viaCode.description}`,
+              `token: ${viaCode.token}`,
+              '',
+              'The token is valid for this exact action only, and only once.',
+            ]),
+          );
+          return;
+        }
+
+        // The APPROVER client, not the agent's. It carries the approver
+        // credential, which lives in a file the agent's process never
+        // reads. An agent calling this command gets a 403 from the
+        // daemon, because it does not have that credential.
+        const approver = await createApproverClient(global.cwd);
+
+        const payload = await approver.call<{
+          ok: boolean;
+          token: string;
+          description: string;
+        }>('approve.issue', { actionId });
         if (!payload.ok) {
           emit(
             cmd,

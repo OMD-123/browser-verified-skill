@@ -424,9 +424,9 @@ async function readDaemonToken(cwd) {
   }
 }
 async function clearDaemonInfo(cwd) {
-  const { rm } = await import("fs/promises");
-  await rm(daemonInfoPath(cwd), { force: true });
-  await rm(daemonTokenPath(cwd), { force: true });
+  const { rm: rm2 } = await import("fs/promises");
+  await rm2(daemonInfoPath(cwd), { force: true });
+  await rm2(daemonTokenPath(cwd), { force: true });
 }
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -444,6 +444,191 @@ var init_daemon_info = __esm({
   "src/core/daemon-info.ts"() {
     "use strict";
     init_paths();
+  }
+});
+
+// src/safety/approver.ts
+var approver_exports = {};
+__export(approver_exports, {
+  APPROVAL_CODE_TTL_MS: () => APPROVAL_CODE_TTL_MS,
+  APPROVER_TOKEN_FILE: () => APPROVER_TOKEN_FILE,
+  APPROVER_TOKEN_HEADER: () => APPROVER_TOKEN_HEADER,
+  ApprovalChannel: () => ApprovalChannel,
+  ApproverCredential: () => ApproverCredential,
+  MAX_FAILED_CODE_ATTEMPTS: () => MAX_FAILED_CODE_ATTEMPTS,
+  approverTokenPath: () => approverTokenPath,
+  compareHashes: () => compareHashes,
+  hashApproverToken: () => hashApproverToken,
+  makeCode: () => makeCode
+});
+import { createHash as createHash2, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "crypto";
+import { chmod as chmod2, readFile as readFile4, writeFile as writeFile5, mkdir as mkdir4 } from "fs/promises";
+import { dirname as dirname4, join as join4 } from "path";
+function hashApproverToken(token) {
+  return createHash2("sha256").update(token, "utf8").digest("hex");
+}
+function compareHashes(a, b) {
+  const bufA = Buffer.from(a, "hex");
+  const bufB = Buffer.from(b, "hex");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual2(bufA, bufB);
+}
+function approverTokenPath(cwd = process.cwd()) {
+  return join4(bvRoot(cwd), APPROVER_TOKEN_FILE);
+}
+function makeCode() {
+  const alphabet = "ACDEFGHJKLMNPQRTUVWXY34679";
+  const bytes = randomBytes2(6);
+  let code = "";
+  for (const byte of bytes) {
+    code += alphabet[byte % alphabet.length];
+  }
+  return code;
+}
+var APPROVER_TOKEN_FILE, APPROVER_TOKEN_HEADER, APPROVAL_CODE_TTL_MS, MAX_FAILED_CODE_ATTEMPTS, ApproverCredential, ApprovalChannel;
+var init_approver = __esm({
+  "src/safety/approver.ts"() {
+    "use strict";
+    init_paths();
+    APPROVER_TOKEN_FILE = "approver.token";
+    APPROVER_TOKEN_HEADER = "x-bv-approver";
+    APPROVAL_CODE_TTL_MS = 5 * 60 * 1e3;
+    MAX_FAILED_CODE_ATTEMPTS = 10;
+    ApproverCredential = class _ApproverCredential {
+      constructor(secret, hash2) {
+        this.secret = secret;
+        this.hash = hash2;
+      }
+      secret;
+      hash;
+      /**
+       * Load the credential, creating it if it does not exist.
+       *
+       * The file is created with mode 0600 and chmod-ed afterwards, because
+       * the file mode on creation is affected by the process umask.
+       */
+      static async load(cwd) {
+        const path = approverTokenPath(cwd);
+        let secret;
+        try {
+          secret = (await readFile4(path, "utf8")).trim();
+          if (secret.length === 0) throw new Error("the approver token file is empty");
+        } catch {
+          secret = randomBytes2(32).toString("hex");
+          await mkdir4(dirname4(path), { recursive: true });
+          await writeFile5(path, `${secret}
+`, { encoding: "utf8", mode: 384 });
+          try {
+            await chmod2(path, 384);
+          } catch {
+          }
+        }
+        return new _ApproverCredential(secret, hashApproverToken(secret));
+      }
+      /** The hash of the secret. Safe to write into a descriptor. */
+      get tokenHash() {
+        return this.hash;
+      }
+      /**
+       * The secret itself.
+       *
+       * Only the operator's client calls this. The agent's process never
+       * loads an `ApproverCredential`, so it never gets here. If you are
+       * holding one of these, you are running code the operator chose to run.
+       */
+      revealSecret() {
+        return this.secret;
+      }
+      /**
+       * Whether a presented secret matches this credential.
+       *
+       * The comparison is constant-time, so a caller cannot learn the secret
+       * by timing how long the comparison took.
+       */
+      matches(presented) {
+        return compareHashes(hashApproverToken(presented), this.hash);
+      }
+    };
+    ApprovalChannel = class {
+      pending = /* @__PURE__ */ new Map();
+      byCode = /* @__PURE__ */ new Map();
+      /** How many wrong codes have been tried, in total. */
+      failedAttempts = 0;
+      /** Add a pending approval and return its code. */
+      add(actionId, actionHash, description) {
+        this.prune();
+        const code = makeCode();
+        const entry = {
+          actionId,
+          actionHash,
+          description,
+          code,
+          createdAt: Date.now()
+        };
+        this.pending.set(actionId, entry);
+        this.byCode.set(code, actionId);
+        return entry;
+      }
+      /** The pending approval for an action id. */
+      get(actionId) {
+        const found = this.pending.get(actionId);
+        if (found === void 0) return void 0;
+        if (Date.now() - found.createdAt > APPROVAL_CODE_TTL_MS) {
+          this.remove(actionId);
+          return void 0;
+        }
+        return found;
+      }
+      /**
+       * The pending approval for a code.
+       *
+       * A wrong code counts as an attempt. After too many, the channel
+       * locks: a six-character code is long enough that guessing it is not
+       * practical, but a lock makes guessing it pointless too.
+       */
+      getByCode(code) {
+        if (this.locked) return void 0;
+        const actionId = this.byCode.get(code.toUpperCase());
+        if (actionId === void 0) {
+          this.failedAttempts += 1;
+          return void 0;
+        }
+        return this.get(actionId);
+      }
+      /** Whether the channel has locked after too many wrong codes. */
+      get locked() {
+        return this.failedAttempts >= MAX_FAILED_CODE_ATTEMPTS;
+      }
+      /** How many wrong codes have been tried. */
+      get attempts() {
+        return this.failedAttempts;
+      }
+      /** Every pending approval. */
+      list() {
+        this.prune();
+        return [...this.pending.values()];
+      }
+      /** Remove a pending approval. */
+      remove(actionId) {
+        const entry = this.pending.get(actionId);
+        if (entry === void 0) return false;
+        this.byCode.delete(entry.code);
+        return this.pending.delete(actionId);
+      }
+      /** Remove the expired ones. */
+      prune() {
+        const now = Date.now();
+        let removed = 0;
+        for (const [actionId, entry] of [...this.pending]) {
+          if (now - entry.createdAt > APPROVAL_CODE_TTL_MS) {
+            this.byCode.delete(entry.code);
+            this.pending.delete(actionId);
+            removed += 1;
+          }
+        }
+        return removed;
+      }
+    };
   }
 });
 
@@ -467,7 +652,23 @@ async function connectDaemon(cwd) {
   const baseUrl = daemonBaseUrl(info);
   return createClient(baseUrl, token, info.port);
 }
-function createClient(baseUrl, token, port) {
+async function createApproverClient(cwd) {
+  const info = await readDaemonInfo(cwd);
+  if (info === void 0) {
+    throw new SessionError("no running session found. Start one with `bv session start`.");
+  }
+  const token = await readDaemonToken(cwd);
+  if (token === void 0) {
+    throw new SessionError(
+      "the session token is missing. Stop the stale session with `bv session stop` and start a new one."
+    );
+  }
+  const { ApproverCredential: ApproverCredential2 } = await Promise.resolve().then(() => (init_approver(), approver_exports));
+  const credential = await ApproverCredential2.load(cwd ?? process.cwd());
+  const baseUrl = daemonBaseUrl(info);
+  return createClient(baseUrl, token, info.port, credential.revealSecret());
+}
+function createClient(baseUrl, token, port, approverSecret) {
   const call = async (method, params = {}, options = {}) => {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const controller = new AbortController();
@@ -478,7 +679,10 @@ function createClient(baseUrl, token, port) {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${token}`
+          authorization: `Bearer ${token}`,
+          // The approver credential, when this client has one. The agent's
+          // client does not, so the daemon refuses its approval requests.
+          ...approverSecret !== void 0 ? { [APPROVER_TOKEN_HEADER]: approverSecret } : {}
         },
         body: JSON.stringify({ method, params }),
         signal: controller.signal
@@ -521,6 +725,7 @@ var init_client = __esm({
   "src/core/client.ts"() {
     "use strict";
     init_daemon_info();
+    init_approver();
     init_errors();
     DEFAULT_TIMEOUT_MS = 12e4;
   }
@@ -1555,8 +1760,8 @@ var init_replay = __esm({
 });
 
 // src/core/runstore/store.ts
-import { appendFile, mkdir as mkdir5, readFile as readFile6, writeFile as writeFile6 } from "fs/promises";
-import { join as join4 } from "path";
+import { appendFile, mkdir as mkdir6, readFile as readFile7, writeFile as writeFile7 } from "fs/promises";
+import { join as join5 } from "path";
 import { randomUUID } from "crypto";
 async function readRun(runId, cwd = process.cwd()) {
   const store = new RunStore(runId, cwd);
@@ -1593,11 +1798,11 @@ var init_store = __esm({
       }
       /** Create the run's directories. */
       async init() {
-        await mkdir5(join4(this.dir, "steps"), { recursive: true });
+        await mkdir6(join5(this.dir, "steps"), { recursive: true });
       }
       /** Append a line to the audit log. */
       async audit(record) {
-        await mkdir5(this.dir, { recursive: true });
+        await mkdir6(this.dir, { recursive: true });
         const line = `${JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), ...record })}
 `;
         await appendFile(auditPath(this.runId, this.cwd), line, "utf8");
@@ -1605,7 +1810,7 @@ var init_store = __esm({
       /** Read the audit log. */
       async readAudit() {
         try {
-          const raw = await readFile6(auditPath(this.runId, this.cwd), "utf8");
+          const raw = await readFile7(auditPath(this.runId, this.cwd), "utf8");
           return raw.split("\n").filter((line) => line.trim().length > 0).map((line) => JSON.parse(line));
         } catch {
           return [];
@@ -1614,34 +1819,34 @@ var init_store = __esm({
       /** Write the full snapshot text for a step. */
       async writeSnapshot(step, text) {
         const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, "aria.txt");
-        await writeFile6(path, text, "utf8");
+        await mkdir6(dir, { recursive: true });
+        const path = join5(dir, "aria.txt");
+        await writeFile7(path, text, "utf8");
         return path;
       }
       /** Write the screenshot for a step. */
       async writeScreenshot(step, data) {
         const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, "screenshot.png");
-        await writeFile6(path, data);
+        await mkdir6(dir, { recursive: true });
+        const path = join5(dir, "screenshot.png");
+        await writeFile7(path, data);
         return path;
       }
       /** Write the state snapshot for a step. */
       async writeState(step, state) {
         const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, "state.json");
-        await writeFile6(path, `${JSON.stringify(state, null, 2)}
+        await mkdir6(dir, { recursive: true });
+        const path = join5(dir, "state.json");
+        await writeFile7(path, `${JSON.stringify(state, null, 2)}
 `, "utf8");
         return path;
       }
       /** Write the network slice for a step. */
       async writeNetwork(step, network) {
         const dir = stepDir(this.runId, step, this.cwd);
-        await mkdir5(dir, { recursive: true });
-        const path = join4(dir, "net.json");
-        await writeFile6(path, `${JSON.stringify(network, null, 2)}
+        await mkdir6(dir, { recursive: true });
+        const path = join5(dir, "net.json");
+        await writeFile7(path, `${JSON.stringify(network, null, 2)}
 `, "utf8");
         return path;
       }
@@ -1652,8 +1857,8 @@ var init_store = __esm({
       }
       /** Write the final result. */
       async writeResult(result) {
-        await mkdir5(this.dir, { recursive: true });
-        await writeFile6(join4(this.dir, "result.json"), `${JSON.stringify(result, null, 2)}
+        await mkdir6(this.dir, { recursive: true });
+        await writeFile7(join5(this.dir, "result.json"), `${JSON.stringify(result, null, 2)}
 `, "utf8");
       }
       /**
@@ -1664,15 +1869,15 @@ var init_store = __esm({
        * is the human-facing record of what the agent did.
        */
       async writeRecorded(recorded) {
-        await mkdir5(this.dir, { recursive: true });
-        const path = join4(this.dir, "recorded.json");
-        await writeFile6(path, JSON.stringify(recorded, null, 2), "utf8");
+        await mkdir6(this.dir, { recursive: true });
+        const path = join5(this.dir, "recorded.json");
+        await writeFile7(path, JSON.stringify(recorded, null, 2), "utf8");
         return path;
       }
       /** Read the run's recorded IR. */
       async readRecorded() {
         try {
-          const raw = await readFile6(join4(this.dir, "recorded.json"), "utf8");
+          const raw = await readFile7(join5(this.dir, "recorded.json"), "utf8");
           return JSON.parse(raw);
         } catch {
           return void 0;
@@ -1681,7 +1886,7 @@ var init_store = __esm({
       /** Read the run's result. */
       async readResult() {
         try {
-          const raw = await readFile6(join4(this.dir, "result.json"), "utf8");
+          const raw = await readFile7(join5(this.dir, "result.json"), "utf8");
           return JSON.parse(raw);
         } catch {
           return void 0;
@@ -2298,7 +2503,7 @@ var init_verifier = __esm({
 });
 
 // src/safety/injection/detectors.ts
-import { randomBytes as randomBytes3 } from "crypto";
+import { randomBytes as randomBytes4 } from "crypto";
 function severityRank2(severity) {
   return SEVERITY_ORDER[severity];
 }
@@ -2897,7 +3102,7 @@ var init_taint = __esm({
 
 // src/core/daemon.ts
 import { createServer } from "http";
-import { randomBytes as randomBytes4 } from "crypto";
+import { randomBytes as randomBytes5 } from "crypto";
 import { once } from "events";
 async function readBody(req, maxBytes) {
   const chunks = [];
@@ -2913,7 +3118,7 @@ async function readBody(req, maxBytes) {
   return Buffer.concat(chunks).toString("utf8");
 }
 async function startDaemon(options) {
-  const token = options.token ?? randomBytes4(32).toString("hex");
+  const token = options.token ?? randomBytes5(32).toString("hex");
   const tokenHash = hashToken(token);
   const maxBodyBytes = options.maxBodyBytes ?? 32 * 1024 * 1024;
   const server = createServer((req, res) => {
@@ -2991,6 +3196,24 @@ async function handleRequest(req, res, options, tokenHash, maxBodyBytes) {
     if (handler === void 0) {
       send(404, { ok: false, error: `unknown method: ${parsed.method}` });
       return;
+    }
+    if (options.approverMethods?.has(parsed.method) === true) {
+      const approverHeader = req.headers["x-bv-approver"];
+      const presentedApprover = typeof approverHeader === "string" ? approverHeader : "";
+      if (options.approverCredential === void 0) {
+        send(403, {
+          ok: false,
+          error: "this daemon has no approver credential, so it cannot approve anything"
+        });
+        return;
+      }
+      if (!options.approverCredential.matches(presentedApprover)) {
+        send(403, {
+          ok: false,
+          error: "this action needs a human approval. The agent token cannot approve it: run `bv approve` from the operator terminal, or enter the one-time code shown there."
+        });
+        return;
+      }
     }
     const result = await handler(parsed);
     send(200, {
@@ -4368,7 +4591,7 @@ var init_session = __esm({
 });
 
 // src/safety/approvals.ts
-import { createHmac, randomBytes as randomBytes5, timingSafeEqual as timingSafeEqual3 } from "crypto";
+import { createHmac, randomBytes as randomBytes6, timingSafeEqual as timingSafeEqual4 } from "crypto";
 function hashAction(action) {
   const payload = JSON.stringify({
     kind: action.kind,
@@ -4390,7 +4613,7 @@ var init_approvals = __esm({
       tokens = /* @__PURE__ */ new Map();
       used = /* @__PURE__ */ new Set();
       constructor(key) {
-        this.key = key ?? randomBytes5(32);
+        this.key = key ?? randomBytes6(32);
       }
       /** The server key, for deriving the HMAC. */
       get serverKey() {
@@ -4442,7 +4665,7 @@ var init_approvals = __esm({
         if (request === void 0) return void 0;
         const issuedAt = new Date(now).toISOString();
         const expiresAt = new Date(now + TOKEN_TTL_MS).toISOString();
-        const nonce = randomBytes5(8).toString("hex");
+        const nonce = randomBytes6(8).toString("hex");
         const signature = this.sign(actionId, request.actionHash, issuedAt, nonce);
         const token = {
           token: `${nonce}.${signature}`,
@@ -4507,6 +4730,124 @@ var init_approvals = __esm({
       sign(actionId, actionHash, issuedAt, nonce) {
         const payload = `${actionId}\0${actionHash}\0${issuedAt}\0${nonce}`;
         return createHmac("sha256", this.key).update(payload).digest("base64url").slice(0, 32);
+      }
+    };
+  }
+});
+
+// src/safety/terminal.ts
+import { open } from "fs/promises";
+import { platform } from "os";
+function terminalPathFor(platformName) {
+  if (platformName === "win32") {
+    return "\\\\.\\CONOUT$";
+  }
+  return "/dev/tty";
+}
+function controllingTerminalPath() {
+  return terminalPathFor(platform());
+}
+function approvalPrompt(options) {
+  const lines = [
+    "",
+    "  bv: this action needs your approval",
+    "",
+    `    action:  ${options.description}`,
+    `    id:      ${options.actionId}`,
+    `    code:   ${options.code}`
+  ];
+  if (options.url !== void 0) {
+    lines.push(`    approve: bv approve ${options.actionId} --code ${options.code}`);
+    lines.push(`    or:     ${options.url}`);
+  } else {
+    lines.push(`    approve: bv approve ${options.actionId} --code ${options.code}`);
+  }
+  lines.push("");
+  lines.push("  The code expires in five minutes and is good for this action only.");
+  lines.push("");
+  return lines.join("\n");
+}
+var ControllingTerminal;
+var init_terminal = __esm({
+  "src/safety/terminal.ts"() {
+    "use strict";
+    ControllingTerminal = class _ControllingTerminal {
+      constructor(handle, failedReason) {
+        this.failedReason = failedReason;
+        this.handle = handle;
+        this.failed = handle === void 0;
+      }
+      failedReason;
+      handle;
+      failed = false;
+      /**
+       * Open the controlling terminal.
+       *
+       * Returns a handle even when there is no terminal, so the caller can
+       * ask `available` rather than handling an exception.
+       */
+      static async open() {
+        return _ControllingTerminal.openPath(controllingTerminalPath());
+      }
+      /**
+       * Open a specific terminal path.
+       *
+       * The path is a parameter so a test can point it at a path that does
+       * not exist, which is what happens on a machine with no controlling
+       * terminal.
+       */
+      static async openPath(path) {
+        return _ControllingTerminal.openWith(path, (target) => open(target, "w"));
+      }
+      /**
+       * Open a terminal with an explicit opener.
+       *
+       * The opener is a parameter so the failure path can be tested: a real
+       * `open` only ever fails one way, and the other way -- a rejection
+       * that is not an Error -- would otherwise be untested.
+       */
+      static async openWith(path, opener) {
+        try {
+          const handle = await opener(path);
+          return new _ControllingTerminal(handle);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new _ControllingTerminal(void 0, message);
+        }
+      }
+      /** Whether there is a terminal to write to. */
+      get available() {
+        return !this.failed && this.handle !== void 0;
+      }
+      /** Why the terminal is unavailable, if it is. */
+      get reason() {
+        return this.failedReason;
+      }
+      /**
+       * Write a line to the controlling terminal.
+       *
+       * Returns whether it was written. A failure here is never fatal: the
+       * approval still works through the code channel, and a daemon that
+       * cannot reach the terminal should still serve requests.
+       */
+      async write(line) {
+        if (this.handle === void 0) return false;
+        try {
+          await this.handle.write(`${line}
+`);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      /** Close the terminal handle. */
+      async close() {
+        if (this.handle === void 0) return;
+        try {
+          await this.handle.close();
+        } catch {
+        }
+        this.handle = void 0;
       }
     };
   }
@@ -4818,8 +5159,8 @@ var init_inspect = __esm({
 });
 
 // src/verify/evidence.ts
-import { mkdir as mkdir8, writeFile as writeFile9 } from "fs/promises";
-import { join as join5 } from "path";
+import { mkdir as mkdir9, writeFile as writeFile10 } from "fs/promises";
+import { join as join7 } from "path";
 function summarizeVerification(result) {
   const lines = [];
   if (result.passed) {
@@ -5170,10 +5511,10 @@ var init_recorder = __esm({
 });
 
 // src/compile/snapshots.ts
-import { readFile as readFile9, readdir as readdir2 } from "fs/promises";
-import { join as join6 } from "path";
+import { readFile as readFile10, readdir as readdir2 } from "fs/promises";
+import { join as join8 } from "path";
 async function readSnapshots(runId, cwd = process.cwd()) {
-  const stepsDir = join6(runDir(runId, cwd), "steps");
+  const stepsDir = join8(runDir(runId, cwd), "steps");
   let entries;
   try {
     entries = await readdir2(stepsDir);
@@ -5182,14 +5523,14 @@ async function readSnapshots(runId, cwd = process.cwd()) {
   }
   const snapshots = [];
   for (const entry of entries.sort()) {
-    const statePath = join6(stepsDir, entry, "state.json");
+    const statePath = join8(stepsDir, entry, "state.json");
     try {
-      const raw = await readFile9(statePath, "utf8");
+      const raw = await readFile10(statePath, "utf8");
       const state = JSON.parse(raw);
       snapshots.push({
         step: Number.parseInt(entry, 10),
         url: typeof state["url"] === "string" ? state["url"] : "",
-        ariaPath: join6(stepsDir, entry, "aria.txt"),
+        ariaPath: join8(stepsDir, entry, "aria.txt"),
         ...typeof state["screenshotPath"] === "string" ? { screenshotPath: state["screenshotPath"] } : {},
         statePath,
         ...typeof state["storageHash"] === "string" ? { storageHash: state["storageHash"] } : {},
@@ -5243,7 +5584,7 @@ __export(daemon_process_exports, {
   createHandlers: () => createHandlers,
   runDaemonProcess: () => runDaemonProcess
 });
-import { readFile as readFile10 } from "fs/promises";
+import { readFile as readFile11 } from "fs/promises";
 function describeType(condition) {
   if ("all" in condition) return "all";
   if ("any" in condition) return "any";
@@ -5351,6 +5692,13 @@ async function collectDomSignals(page) {
   return raw;
 }
 function createHandlers(context) {
+  const approverChannel = context.approverChannel ?? new ApprovalChannel();
+  let terminal;
+  let terminalWarningShown = false;
+  const getTerminal = async () => {
+    if (terminal === void 0) terminal = await ControllingTerminal.open();
+    return terminal;
+  };
   const { store, policy, planLock, approvals, scanner, recorder, getSession } = context;
   const runId = context.runId;
   const options = { cwd: context.cwd, headed: context.headed === true };
@@ -5469,6 +5817,11 @@ function createHandlers(context) {
       };
     },
     // --- Approvals --------------------------------------------------------
+    //
+    // `approve.issue` mints the one-time token. The DAEMON refuses this
+    // method unless the request carries the approver credential, which
+    // the agent's process never reads. So an agent cannot approve its own
+    // action, however it asks.
     "approve.issue": async (request) => {
       const params = request.params ?? {};
       const actionId = params["actionId"];
@@ -5490,8 +5843,54 @@ function createHandlers(context) {
         data: { ok: true, token: token.token, description: pending.description }
       };
     },
+    // The code channel. The human reads a short code from the controlling
+    // terminal and enters it here. The code is bound to one action and
+    // expires, so it cannot be reused or guessed.
+    "approve.code": async (request) => {
+      const params = request.params ?? {};
+      const code = params["code"];
+      if (typeof code !== "string") {
+        return { data: { ok: false, error: "code is required" }, exitCode: EXIT.USAGE };
+      }
+      const pending = approverChannel.getByCode(code);
+      if (pending === void 0) {
+        return {
+          data: { ok: false, error: "that code is not valid, or it has expired" }
+        };
+      }
+      const stored = approvals.getPending(pending.actionId);
+      if (stored === void 0) {
+        return {
+          data: { ok: false, error: `no pending action with id ${pending.actionId}` }
+        };
+      }
+      const token = approvals.issue(pending.actionId);
+      if (token === void 0) {
+        return {
+          data: { ok: false, error: `could not issue a token for ${pending.actionId}` }
+        };
+      }
+      approverChannel.remove(pending.actionId);
+      return {
+        data: { ok: true, token: token.token, description: stored.description }
+      };
+    },
+    // The pending approvals, with their codes. This one is safe for the
+    // agent to read: the codes are shown to the human on the controlling
+    // terminal, not to the agent.
     "approve.list": async () => ({
-      data: { pending: approvals.listPending() }
+      data: {
+        pending: approvals.listPending().map((entry) => ({
+          ...entry,
+          code: approverChannel.get(entry.actionId)?.code
+        }))
+      }
+    }),
+    // The pending approvals that are waiting for a human, including their
+    // codes. The agent may read this so it can TELL the human which code
+    // to enter.
+    "approve.waiting": async () => ({
+      data: { waiting: approverChannel.list() }
     }),
     // --- Rewind -----------------------------------------------------------
     rewind: async (request) => {
@@ -5508,7 +5907,7 @@ function createHandlers(context) {
       const page = await s.page();
       if (snapshot?.statePath !== void 0) {
         try {
-          const raw = await readFile10(snapshot.statePath, "utf8");
+          const raw = await readFile11(snapshot.statePath, "utf8");
           const state = JSON.parse(raw);
           if (state.storageState !== void 0) {
             await s.replaceStorageState(state.storageState);
@@ -5677,6 +6076,30 @@ function createHandlers(context) {
       );
       if (!verdict.allowed) {
         const exitCode = verdict.next === "needs_approval" ? EXIT.NEEDS_APPROVAL : EXIT.POLICY_DENIED;
+        let approvalCode;
+        if (verdict.approval !== void 0) {
+          const entry = approverChannel.add(
+            verdict.approval.actionId,
+            verdict.approval.actionHash,
+            verdict.approval.description
+          );
+          approvalCode = entry.code;
+          const tty = await getTerminal();
+          const shown = await tty.write(
+            approvalPrompt({
+              actionId: verdict.approval.actionId,
+              code: entry.code,
+              description: verdict.approval.description,
+              url: currentUrl
+            })
+          );
+          if (!shown && !terminalWarningShown) {
+            terminalWarningShown = true;
+            await tty.write(
+              "  bv: no controlling terminal is available, so the approval code cannot be shown here.\n"
+            );
+          }
+        }
         return {
           data: {
             ok: false,
@@ -5687,7 +6110,8 @@ function createHandlers(context) {
             ruleIds: verdict.ruleIds,
             ...verdict.approval !== void 0 ? {
               approvalId: verdict.approval.actionId,
-              approvalDescription: verdict.approval.description
+              approvalDescription: verdict.approval.description,
+              ...approvalCode !== void 0 ? { approvalCode } : {}
             } : {}
           },
           exitCode
@@ -5863,11 +6287,14 @@ async function runDaemonProcess(options) {
     recorder,
     getSession
   });
+  const approverCredential = await ApproverCredential.load(options.cwd);
   const daemon = await startDaemon({
     handlers,
     session: options.session,
     headed: options.headed,
-    browser: "chromium"
+    browser: "chromium",
+    approverCredential,
+    approverMethods: APPROVER_METHODS
   });
   const info = daemon.info;
   await writeDaemonInfo(info, daemon.token, options.cwd);
@@ -5892,7 +6319,7 @@ async function runDaemonProcess(options) {
     daemon.server.once("close", () => resolve5());
   });
 }
-var ACTION_CLASS_SET, ACTION_KINDS2;
+var APPROVER_METHODS, ACTION_CLASS_SET, ACTION_KINDS2;
 var init_daemon_process = __esm({
   "src/core/daemon-process.ts"() {
     "use strict";
@@ -5907,6 +6334,8 @@ var init_daemon_process = __esm({
     init_policy();
     init_planlock();
     init_approvals();
+    init_approver();
+    init_terminal();
     init_gate();
     init_inspect();
     init_taint();
@@ -5919,6 +6348,7 @@ var init_daemon_process = __esm({
     init_recorder();
     init_store();
     init_snapshots();
+    APPROVER_METHODS = /* @__PURE__ */ new Set(["approve.issue"]);
     ACTION_CLASS_SET = new Set(ACTION_CLASSES);
     ACTION_KINDS2 = [
       "click",
@@ -6245,14 +6675,14 @@ function registerInit(program) {
 import { spawn } from "child_process";
 import { existsSync as existsSync3 } from "fs";
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { dirname as dirname4, resolve as resolve4 } from "path";
+import { dirname as dirname5, resolve as resolve4 } from "path";
 init_exit();
 init_client();
 init_daemon_info();
 init_paths();
 init_errors();
 function daemonEntry() {
-  const here = dirname4(fileURLToPath3(import.meta.url));
+  const here = dirname5(fileURLToPath3(import.meta.url));
   const sourceEntry = resolve4(here, "..", "..", "core", "daemon-entry.ts");
   const tsxCli = resolve4(here, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs");
   if (existsSync3(sourceEntry)) {
@@ -6618,7 +7048,7 @@ function describeTarget(descriptor) {
 }
 
 // src/cli/commands/safety.ts
-import { readFile as readFile5 } from "fs/promises";
+import { readFile as readFile6 } from "fs/promises";
 init_exit();
 init_client();
 init_errors();
@@ -6630,12 +7060,12 @@ init_paths();
 import {
   createCipheriv,
   createDecipheriv,
-  randomBytes as randomBytes2,
+  randomBytes as randomBytes3,
   scryptSync,
-  timingSafeEqual as timingSafeEqual2
+  timingSafeEqual as timingSafeEqual3
 } from "crypto";
-import { mkdir as mkdir4, readFile as readFile4, writeFile as writeFile5 } from "fs/promises";
-import { dirname as dirname5 } from "path";
+import { mkdir as mkdir5, readFile as readFile5, writeFile as writeFile6 } from "fs/promises";
+import { dirname as dirname6 } from "path";
 var VAULT_MAGIC = "BVV1";
 var SALT_LENGTH = 16;
 var IV_LENGTH = 12;
@@ -6645,8 +7075,8 @@ function deriveKey(passphrase, salt) {
   return scryptSync(passphrase, salt, KEY_LENGTH, SCRYPT_OPTIONS);
 }
 function encryptVault(contents, passphrase) {
-  const salt = randomBytes2(SALT_LENGTH);
-  const iv = randomBytes2(IV_LENGTH);
+  const salt = randomBytes3(SALT_LENGTH);
+  const iv = randomBytes3(IV_LENGTH);
   const key = deriveKey(passphrase, salt);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   const plaintext = Buffer.from(JSON.stringify(contents), "utf8");
@@ -6691,7 +7121,7 @@ var Vault = class {
   async load(passphrase, cwd) {
     let raw;
     try {
-      raw = await readFile4(vaultPath(cwd), "utf8");
+      raw = await readFile5(vaultPath(cwd), "utf8");
     } catch {
       this.contents = { secrets: {} };
       this.loaded = true;
@@ -6705,9 +7135,9 @@ var Vault = class {
   /** Write the vault to disk. */
   async save(passphrase, cwd) {
     const path = vaultPath(cwd);
-    await mkdir4(dirname5(path), { recursive: true });
+    await mkdir5(dirname6(path), { recursive: true });
     const file = encryptVault(this.contents, passphrase);
-    await writeFile5(path, JSON.stringify(file, null, 2), { encoding: "utf8", mode: 384 });
+    await writeFile6(path, JSON.stringify(file, null, 2), { encoding: "utf8", mode: 384 });
   }
   /** Store a secret. */
   set(name, value) {
@@ -6771,7 +7201,7 @@ function registerSafety(program) {
   plan.command("set").description("set the plan from a JSON file").argument("<file>", "the plan JSON file").action(async (file, cmd) => {
     const global = globalOptions(cmd);
     try {
-      const raw = await readFile5(absPath(file, global.cwd), "utf8");
+      const raw = await readFile6(absPath(file, global.cwd), "utf8");
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -6846,14 +7276,60 @@ function registerSafety(program) {
       }
     }
   );
-  program.command("approve").description("approve a pending action and print a one-time token").argument("<actionId>", "the action id from the refusal").action(async (actionId, cmd) => {
+  program.command("approvals").description("list the actions waiting for a human approval").action(async (_options, cmd) => {
     const global = globalOptions(cmd);
     try {
       const client = await connectDaemon(global.cwd);
-      const payload = await client.call(
-        "approve.issue",
-        { actionId }
-      );
+      const payload = await client.call("approve.waiting");
+      if (payload.waiting.length === 0) {
+        emit(cmd, ok({ waiting: [] }, ["nothing is waiting for approval"]));
+        return;
+      }
+      const lines = [];
+      for (const entry of payload.waiting) {
+        lines.push(`${entry.code}  ${entry.actionId}`);
+        lines.push(`      ${entry.description}`);
+        lines.push(`      approve: bv approve ${entry.actionId} --code ${entry.code}`);
+      }
+      emit(cmd, ok({ waiting: payload.waiting }, lines));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      emit(cmd, fail({ error: message }, [message], EXIT.FAILURE));
+    }
+  });
+  program.command("approve").description("approve a pending action and print a one-time token").argument("<actionId>", "the action id from the refusal").option("--code <code>", "the one-time code shown on the controlling terminal").action(async (actionId, options, cmd) => {
+    const global = globalOptions(cmd);
+    try {
+      if (options.code !== void 0) {
+        const client = await connectDaemon(global.cwd);
+        const viaCode = await client.call(
+          "approve.code",
+          { code: options.code }
+        );
+        if (!viaCode.ok) {
+          emit(
+            cmd,
+            fail(
+              { error: "that code is not valid, or it has expired" },
+              ["that code is not valid, or it has expired"],
+              EXIT.FAILURE
+            )
+          );
+          return;
+        }
+        emit(
+          cmd,
+          ok(viaCode, [
+            `approved: ${viaCode.description}`,
+            `token: ${viaCode.token}`,
+            "",
+            "The token is valid for this exact action only, and only once."
+          ])
+        );
+        return;
+      }
+      const approver = await createApproverClient(global.cwd);
+      const payload = await approver.call("approve.issue", { actionId });
       if (!payload.ok) {
         emit(
           cmd,
@@ -6989,8 +7465,8 @@ async function readSecretFromStdin(name) {
 }
 
 // src/cli/commands/proof.ts
-import { readFile as readFile7, writeFile as writeFile7, mkdir as mkdir6 } from "fs/promises";
-import { dirname as dirname7 } from "path";
+import { readFile as readFile8, writeFile as writeFile8, mkdir as mkdir7 } from "fs/promises";
+import { dirname as dirname8 } from "path";
 init_exit();
 init_client();
 init_errors();
@@ -7000,7 +7476,7 @@ init_planlock();
 // src/memory/playbooks.ts
 init_paths();
 import { mkdirSync, readFileSync as readFileSync2, renameSync, writeFileSync, existsSync as existsSync4 } from "fs";
-import { dirname as dirname6 } from "path";
+import { dirname as dirname7 } from "path";
 var DEFAULT_TTL_DAYS = 30;
 var Playbooks = class {
   constructor(cwd = process.cwd(), options = {}) {
@@ -7034,7 +7510,7 @@ var Playbooks = class {
   save() {
     const entries = this.load();
     const path = playbooksPath(this.cwd);
-    mkdirSync(dirname6(path), { recursive: true });
+    mkdirSync(dirname7(path), { recursive: true });
     const file = { version: 1, entries: Object.fromEntries(entries) };
     const temporary = `${path}.tmp`;
     writeFileSync(temporary, JSON.stringify(file, null, 2), "utf8");
@@ -7373,7 +7849,7 @@ function registerProof(program) {
       return;
     }
     try {
-      const raw = await readFile7(absPath(options.condition, global.cwd), "utf8");
+      const raw = await readFile8(absPath(options.condition, global.cwd), "utf8");
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -7419,7 +7895,7 @@ function registerProof(program) {
       return;
     }
     try {
-      const raw = await readFile7(absPath(options.schema, global.cwd), "utf8");
+      const raw = await readFile8(absPath(options.schema, global.cwd), "utf8");
       let schema;
       try {
         schema = JSON.parse(raw);
@@ -7432,8 +7908,8 @@ function registerProof(program) {
       const text = renderExtract(payload, format);
       if (options.out !== void 0) {
         const path = absPath(options.out, global.cwd);
-        await mkdir6(dirname7(path), { recursive: true });
-        await writeFile7(path, text, "utf8");
+        await mkdir7(dirname8(path), { recursive: true });
+        await writeFile8(path, text, "utf8");
         emit(cmd, ok(payload, [`written to ${options.out}`]));
         return;
       }
@@ -7486,8 +7962,8 @@ function registerProof(program) {
       const script = renderScript(flow);
       const out = options.out ?? `flows/${runId}.spec.ts`;
       const path = absPath(out, global.cwd);
-      await mkdir6(dirname7(path), { recursive: true });
-      await writeFile7(path, script, "utf8");
+      await mkdir7(dirname8(path), { recursive: true });
+      await writeFile8(path, script, "utf8");
       const lines = [
         `compiled ${run2.steps.length} step(s) into ${out}`,
         ...flow.variables.length > 0 ? [`variables: ${flow.variables.map((v) => v.name).join(", ")}`] : []
@@ -7646,8 +8122,8 @@ async function readDrift(runId, cwd) {
 }
 
 // src/cli/commands/qa.ts
-import { writeFile as writeFile8, mkdir as mkdir7, readFile as readFile8 } from "fs/promises";
-import { dirname as dirname8 } from "path";
+import { writeFile as writeFile9, mkdir as mkdir8, readFile as readFile9 } from "fs/promises";
+import { dirname as dirname9 } from "path";
 init_exit();
 init_client();
 init_errors();
@@ -7801,7 +8277,7 @@ Changed (${result.changed.length}):`);
 }
 
 // src/testing/qa.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 var FindingsCollector = class {
   console = [];
   networkFailures = [];
@@ -8307,6 +8783,11 @@ function parseSuite(raw) {
 // src/testing/redteam.ts
 init_detectors();
 init_taint();
+init_approver();
+init_daemon();
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join as join6 } from "path";
 var CATALOGUE = [
   {
     name: "an instruction in the page text",
@@ -8428,9 +8909,52 @@ var CATALOGUE = [
       const value = taint("typed-by-the-user", { source: "user" });
       return !isTainted(value);
     }
+  },
+  {
+    // The attack the approver split exists for. The agent holds the
+    // daemon token, so in v1 it could mint its own approval. The check
+    // starts a daemon with an approver credential and asks it to issue
+    // a token with only the agent token.
+    name: "the agent approves its own action with the daemon token",
+    technique: "self-approval",
+    kind: "approval",
+    check: async () => {
+      const dir = await mkdtemp(join6(tmpdir(), "bv-self-approval-"));
+      try {
+        const credential = await ApproverCredential.load(dir);
+        const daemon = await startDaemon({
+          handlers: {
+            // The handler must never run: the daemon refuses the request
+            // before it gets here. It is here so that a regression which
+            // let the request through would hand out a token and fail the
+            // check.
+            "approve.issue": () => Promise.resolve({ data: { ok: true, token: "forged" } })
+          },
+          approverCredential: credential,
+          approverMethods: /* @__PURE__ */ new Set(["approve.issue"])
+        });
+        try {
+          const response = await fetch(`http://127.0.0.1:${daemon.port}/rpc`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: `Bearer ${daemon.token}`
+            },
+            body: JSON.stringify({ method: "approve.issue", params: { actionId: "a-1" } })
+          });
+          if (response.status !== 403) return false;
+          const body = await response.json();
+          return body.ok === false && body.data?.token === void 0;
+        } finally {
+          await daemon.close();
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
   }
 ];
-function runRedTeam() {
+async function runRedTeam() {
   const scanner = new InjectionScanner();
   const results = [];
   for (const attack of CATALOGUE) {
@@ -8446,7 +8970,7 @@ function runRedTeam() {
     }
     let caught;
     try {
-      caught = attack.check?.() === true;
+      caught = await attack.check?.() === true;
     } catch {
       caught = false;
     }
@@ -8485,7 +9009,7 @@ function registerQa(program) {
       return;
     }
     try {
-      const raw = await readFile8(absPath(options.suite, global.cwd), "utf8");
+      const raw = await readFile9(absPath(options.suite, global.cwd), "utf8");
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -8506,8 +9030,8 @@ function registerQa(program) {
       const text = renderSuite(result);
       if (options.out !== void 0) {
         const path = absPath(options.out, global.cwd);
-        await mkdir7(dirname8(path), { recursive: true });
-        await writeFile8(path, text, "utf8");
+        await mkdir8(dirname9(path), { recursive: true });
+        await writeFile9(path, text, "utf8");
       }
       emit(
         cmd,
@@ -8519,7 +9043,7 @@ function registerQa(program) {
       emit(cmd, fail({ error: message }, [message], code));
     }
   });
-  program.command("redteam").description("test the tool's own guards against known attacks").argument("[action]", "run (the only action for now)", "run").action((action, cmd) => {
+  program.command("redteam").description("test the tool's own guards against known attacks").argument("[action]", "run (the only action for now)", "run").action(async (action, cmd) => {
     const global = globalOptions(cmd);
     if (action !== "run") {
       const message = `unknown redteam action "${action}". The only action is "run".`;
@@ -8527,7 +9051,7 @@ function registerQa(program) {
       return;
     }
     try {
-      const result = runRedTeam();
+      const result = await runRedTeam();
       emit(
         cmd,
         result.failed === 0 ? ok(result, [renderRedTeam(result)]) : fail(result, [renderRedTeam(result)], EXIT.VERIFICATION_FAILED)
@@ -8557,8 +9081,8 @@ function registerQa(program) {
       }
       if (options.out !== void 0) {
         const path = absPath(options.out, global.cwd);
-        await mkdir7(dirname8(path), { recursive: true });
-        await writeFile8(path, text, "utf8");
+        await mkdir8(dirname9(path), { recursive: true });
+        await writeFile9(path, text, "utf8");
       }
       emit(
         cmd,
@@ -8578,8 +9102,8 @@ function registerQa(program) {
       const text = options.openapi === true ? JSON.stringify(asOpenApiFragment(endpoints), null, 2) : renderEndpoints(endpoints);
       if (options.out !== void 0) {
         const path = absPath(options.out, global.cwd);
-        await mkdir7(dirname8(path), { recursive: true });
-        await writeFile8(path, text, "utf8");
+        await mkdir8(dirname9(path), { recursive: true });
+        await writeFile9(path, text, "utf8");
       }
       emit(cmd, ok({ runId, endpoints, count: endpoints.length }, [text]));
     } catch (err) {
@@ -8597,7 +9121,7 @@ function registerQa(program) {
         return;
       }
       try {
-        const questionsRaw = await readFile8(absPath(options.questions, global.cwd), "utf8");
+        const questionsRaw = await readFile9(absPath(options.questions, global.cwd), "utf8");
         let parsed;
         try {
           parsed = JSON.parse(questionsRaw);
@@ -8606,7 +9130,7 @@ function registerQa(program) {
           throw new UsageError(`the questions file is not valid JSON: ${detail}`);
         }
         const questions = normaliseQuestions(parsed);
-        const sources = (await readFile8(absPath(options.sources, global.cwd), "utf8")).split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("#"));
+        const sources = (await readFile9(absPath(options.sources, global.cwd), "utf8")).split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("#"));
         const browser = await launchChromium();
         let result;
         try {
@@ -8617,8 +9141,8 @@ function registerQa(program) {
         const text = renderResearch(result);
         if (options.out !== void 0) {
           const path = absPath(options.out, global.cwd);
-          await mkdir7(dirname8(path), { recursive: true });
-          await writeFile8(path, text, "utf8");
+          await mkdir8(dirname9(path), { recursive: true });
+          await writeFile9(path, text, "utf8");
         }
         emit(cmd, ok(result, [text]));
       } catch (err) {
@@ -8644,8 +9168,8 @@ function registerQa(program) {
       const text = format === "json" ? renderReportsJson(reports) : renderFullReport(findings, reports);
       if (options.out !== void 0) {
         const path = absPath(options.out, global.cwd);
-        await mkdir7(dirname8(path), { recursive: true });
-        await writeFile8(path, text, "utf8");
+        await mkdir8(dirname9(path), { recursive: true });
+        await writeFile9(path, text, "utf8");
       }
       const lines = format === "json" ? [`${reports.length} problem(s) found.`] : [renderReports(reports)];
       emit(cmd, ok({ runId, findings, reports }, lines));
@@ -8683,7 +9207,7 @@ function collect2(value, previous) {
 async function readNetworkFacts(runId, cwd) {
   const path = `${runDir(runId, cwd)}/network.json`;
   try {
-    const raw = await readFile8(path, "utf8");
+    const raw = await readFile9(path, "utf8");
     return JSON.parse(raw);
   } catch {
     throw new UsageError(
@@ -8717,7 +9241,7 @@ function normaliseQuestions(parsed) {
 async function readFindings(runId, cwd) {
   const path = `${runDir(runId, cwd)}/findings.json`;
   try {
-    const raw = await readFile8(path, "utf8");
+    const raw = await readFile9(path, "utf8");
     return JSON.parse(raw);
   } catch {
     throw new UsageError(
@@ -8728,7 +9252,7 @@ async function readFindings(runId, cwd) {
 async function readAudit(runId, cwd) {
   const path = `${runDir(runId, cwd)}/audit.jsonl`;
   try {
-    const raw = await readFile8(path, "utf8");
+    const raw = await readFile9(path, "utf8");
     return raw.split("\n").filter((line) => line.trim().length > 0).map((line) => JSON.parse(line));
   } catch {
     return [];

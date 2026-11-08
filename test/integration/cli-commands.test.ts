@@ -15,11 +15,12 @@ import { registerQa } from '../../src/cli/commands/qa.js';
 import { registerSession } from '../../src/cli/commands/session.js';
 import { registerPerception } from '../../src/cli/commands/perception.js';
 import { setRootProgram } from '../../src/cli/helpers.js';
-import { connectDaemon, type DaemonClient } from '../../src/core/client.js';
+import { connectDaemon, createApproverClient, type DaemonClient } from '../../src/core/client.js';
 import type { readRun as ReadRunType } from '../../src/core/runstore/store.js';
 
 vi.mock('../../src/core/client.js', () => ({
   connectDaemon: vi.fn(),
+  createApproverClient: vi.fn(),
 }));
 
 vi.mock('../../src/core/runstore/store.js', async () => {
@@ -44,6 +45,7 @@ function mockClient(payload: unknown): DaemonClient {
 }
 
 const mockedConnect = vi.mocked(connectDaemon);
+const mockedApprover = vi.mocked(createApproverClient);
 const { readRun } = await import('../../src/core/runstore/store.js');
 const mockedReadRun = vi.mocked(readRun);
 
@@ -366,7 +368,9 @@ describe('the CLI command modules', () => {
   });
 
   it('approves an action', async () => {
-    mockedConnect.mockResolvedValue(
+    // `bv approve` uses the APPROVER client, not the agent's. The
+    // approver client carries the credential the agent never has.
+    mockedApprover.mockResolvedValue(
       mockClient({ ok: true, token: 'tok', description: 'an action' }),
     );
 
@@ -375,12 +379,59 @@ describe('the CLI command modules', () => {
   });
 
   it('reports an approval that cannot be issued', async () => {
-    mockedConnect.mockResolvedValue(
+    mockedApprover.mockResolvedValue(
       mockClient({ ok: false, error: 'no pending action with id action-1' }),
     );
 
     const result = await run(dir, ['approve', 'action-1']);
     expect(result.stdout).toContain('no pending action');
+  });
+
+  it('approves an action with a one-time code', async () => {
+    // The code channel needs no credential: the code itself is the
+    // human's proof, read from the controlling terminal.
+    mockedConnect.mockResolvedValue(
+      mockClient({ ok: true, token: 'tok', description: 'an action' }),
+    );
+
+    const result = await run(dir, ['approve', 'action-1', '--code', 'ABC234']);
+    expect(result.stdout).toContain('approved');
+    expect(result.stdout).toContain('tok');
+  });
+
+  it('reports a code that is not valid', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({ ok: false, error: 'that code is not valid, or it has expired' }),
+    );
+
+    const result = await run(dir, ['approve', 'action-1', '--code', 'ABC234']);
+    expect(result.stdout).toContain('not valid');
+  });
+
+  it('lists the actions waiting for approval', async () => {
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        waiting: [
+          {
+            actionId: 'action-1',
+            description: 'click Submit',
+            code: 'ABC234',
+            createdAt: Date.now(),
+          },
+        ],
+      }),
+    );
+
+    const result = await run(dir, ['approvals']);
+    expect(result.stdout).toContain('ABC234');
+    expect(result.stdout).toContain('click Submit');
+  });
+
+  it('says nothing is waiting for approval', async () => {
+    mockedConnect.mockResolvedValue(mockClient({ waiting: [] }));
+
+    const result = await run(dir, ['approvals']);
+    expect(result.stdout).toContain('nothing is waiting');
   });
 
   // --- bv session ---------------------------------------------------------

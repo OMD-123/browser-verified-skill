@@ -5,7 +5,8 @@
  * reads the descriptor from `.bv/daemon.json`, loads the bearer token from
  * `.bv/daemon.token`, and speaks the small JSON-over-HTTP protocol.
  */
-import { readDaemonInfo, readDaemonToken, isProcessAlive, daemonBaseUrl } from './daemon-info.js';
+import { readDaemonInfo, readDaemonToken, daemonBaseUrl, isProcessAlive } from './daemon-info.js';
+import { APPROVER_TOKEN_HEADER } from '../safety/approver.js';
 import { SessionError } from './errors.js';
 import type { DaemonRequest, DaemonResponse } from './daemon.js';
 
@@ -54,8 +55,42 @@ export async function connectDaemon(cwd?: string): Promise<DaemonClient> {
   return createClient(baseUrl, token, info.port);
 }
 
+/**
+ * Build a client that can also approve.
+ *
+ * This is the **operator's** client, not the agent's. It reads the
+ * approver credential from `approver.token`, a file the agent's process
+ * never reads, and sends it on the approval methods.
+ *
+ * The agent's own client does not have one, so an agent calling
+ * `approve.issue` is refused by the daemon.
+ */
+export async function createApproverClient(cwd?: string): Promise<DaemonClient> {
+  const info = await readDaemonInfo(cwd);
+  if (info === undefined) {
+    throw new SessionError('no running session found. Start one with `bv session start`.');
+  }
+  const token = await readDaemonToken(cwd);
+  if (token === undefined) {
+    throw new SessionError(
+      'the session token is missing. Stop the stale session with `bv session stop` and start a new one.',
+    );
+  }
+
+  const { ApproverCredential } = await import('../safety/approver.js');
+  const credential = await ApproverCredential.load(cwd ?? process.cwd());
+
+  const baseUrl = daemonBaseUrl(info);
+  return createClient(baseUrl, token, info.port, credential.revealSecret());
+}
+
 /** Build a client for an explicit base URL and token. */
-export function createClient(baseUrl: string, token: string, port: number): DaemonClient {
+export function createClient(
+  baseUrl: string,
+  token: string,
+  port: number,
+  approverSecret?: string,
+): DaemonClient {
   const call = async <T = unknown>(
     method: string,
     params: Record<string, unknown> = {},
@@ -72,6 +107,9 @@ export function createClient(baseUrl: string, token: string, port: number): Daem
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${token}`,
+          // The approver credential, when this client has one. The agent's
+          // client does not, so the daemon refuses its approval requests.
+          ...(approverSecret !== undefined ? { [APPROVER_TOKEN_HEADER]: approverSecret } : {}),
         },
         body: JSON.stringify({ method, params } satisfies DaemonRequest),
         signal: controller.signal,

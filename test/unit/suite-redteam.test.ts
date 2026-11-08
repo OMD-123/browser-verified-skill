@@ -191,8 +191,8 @@ describe('the test runner', () => {
 });
 
 describe('the red-team runner', () => {
-  it('catches every attack in the catalogue', () => {
-    const result = runRedTeam();
+  it('catches every attack in the catalogue', async () => {
+    const result = await runRedTeam();
 
     const missed = result.results.filter((entry) => !entry.caught).map((entry) => entry.name);
     expect(missed, `these attacks got through: ${missed.join(', ')}`).toEqual([]);
@@ -214,8 +214,8 @@ describe('the red-team runner', () => {
     }
   });
 
-  it('renders the result', () => {
-    const text = renderRedTeam(runRedTeam());
+  it('renders the result', async () => {
+    const text = renderRedTeam(await runRedTeam());
     expect(text).toContain('attack(s) were caught');
     expect(text).toContain('✓');
   });

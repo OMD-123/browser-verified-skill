@@ -92,7 +92,7 @@ export function registerQa(program: Command): void {
     .command('redteam')
     .description("test the tool's own guards against known attacks")
     .argument('[action]', 'run (the only action for now)', 'run')
-    .action((action: string, cmd: Command) => {
+    .action(async (action: string, cmd: Command) => {
       const global = globalOptions(cmd);
       if (action !== 'run') {
         const message = `unknown redteam action "${action}". The only action is "run".`;
@@ -101,7 +101,7 @@ export function registerQa(program: Command): void {
       }
 
       try {
-        const result = runRedTeam();
+        const result = await runRedTeam();
         emit(
           cmd,
           result.failed === 0

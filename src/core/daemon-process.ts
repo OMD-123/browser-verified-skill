@@ -21,7 +21,27 @@ import { EXIT } from './exit.js';
 import type { Page } from 'playwright';
 import { ACTION_CLASSES, loadPolicy, type Policy } from '../safety/policy.js';
 import { PlanLock, PlanSchema, type Plan } from '../safety/planlock.js';
-import { ApprovalStore, hashAction } from '../safety/approvals.js';
+import { hashAction, ApprovalStore } from '../safety/approvals.js';
+import { ApprovalChannel, ApproverCredential } from '../safety/approver.js';
+import { ControllingTerminal, approvalPrompt } from '../safety/terminal.js';
+
+/**
+ * The methods that need the approver credential.
+ *
+ * The daemon checks the credential before any of these runs, so no handler
+ * can forget to check it.
+ *
+ * `approve.code` is NOT in this list, and that is deliberate. The code
+ * channel exists so a human can approve WITHOUT holding a credential:
+ * the short code, shown on the controlling terminal, is the human's
+ * proof. Requiring the credential there too would make the channel
+ * pointless.
+ *
+ * The code is six characters from a 29-character alphabet, expires in
+ * five minutes, is bound to one action, and is consumed on use. The
+ * channel also locks after ten wrong codes.
+ */
+const APPROVER_METHODS: ReadonlySet<string> = new Set(['approve.issue']);
 import { evaluateAction } from '../safety/gate.js';
 import { inspectTarget } from '../safety/inspect.js';
 import { sinkForField } from '../safety/taint.js';
@@ -261,6 +281,14 @@ export interface DaemonContext {
   planLock: PlanLock;
   /** The approval store. */
   approvals: ApprovalStore;
+  /**
+   * The pending approvals, waiting for a human.
+   *
+   * Optional, so a test can build a context without one. The channel
+   * holds the short codes. Issuing a TOKEN needs the approver credential,
+   * which the daemon checks before the handler runs.
+   */
+  approverChannel?: ApprovalChannel;
   /** The injection scanner. */
   scanner: InjectionScanner;
   /** The recorder. */
@@ -277,6 +305,21 @@ export interface DaemonContext {
  * listening socket, and the coverage report shows what is really exercised.
  */
 export function createHandlers(context: DaemonContext): Record<string, DaemonHandler> {
+  // The pending approvals, waiting for a human. The codes are shown on
+  // the controlling terminal and are the only way a human can approve
+  // without giving the agent a credential.
+  const approverChannel = context.approverChannel ?? new ApprovalChannel();
+
+  // The controlling terminal, for the approval prompts. Opened once,
+  // lazily, on the first approval that needs it.
+  let terminal: ControllingTerminal | undefined;
+  let terminalWarningShown = false;
+
+  const getTerminal = async (): Promise<ControllingTerminal> => {
+    if (terminal === undefined) terminal = await ControllingTerminal.open();
+    return terminal;
+  };
+
   const { store, policy, planLock, approvals, scanner, recorder, getSession } = context;
   const runId = context.runId;
   const options = { cwd: context.cwd, headed: context.headed === true };
@@ -420,6 +463,11 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
     },
 
     // --- Approvals --------------------------------------------------------
+    //
+    // `approve.issue` mints the one-time token. The DAEMON refuses this
+    // method unless the request carries the approver credential, which
+    // the agent's process never reads. So an agent cannot approve its own
+    // action, however it asks.
     'approve.issue': async (request: DaemonRequest) => {
       const params = request.params ?? {};
       const actionId = params['actionId'];
@@ -442,8 +490,61 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
       };
     },
 
+    // The code channel. The human reads a short code from the controlling
+    // terminal and enters it here. The code is bound to one action and
+    // expires, so it cannot be reused or guessed.
+    'approve.code': async (request: DaemonRequest) => {
+      const params = request.params ?? {};
+      const code = params['code'];
+      if (typeof code !== 'string') {
+        return { data: { ok: false, error: 'code is required' }, exitCode: EXIT.USAGE };
+      }
+
+      const pending = approverChannel.getByCode(code);
+      if (pending === undefined) {
+        return {
+          data: { ok: false, error: 'that code is not valid, or it has expired' },
+        };
+      }
+
+      const stored = approvals.getPending(pending.actionId);
+      if (stored === undefined) {
+        return {
+          data: { ok: false, error: `no pending action with id ${pending.actionId}` },
+        };
+      }
+
+      const token = approvals.issue(pending.actionId);
+      if (token === undefined) {
+        return {
+          data: { ok: false, error: `could not issue a token for ${pending.actionId}` },
+        };
+      }
+
+      approverChannel.remove(pending.actionId);
+
+      return {
+        data: { ok: true, token: token.token, description: stored.description },
+      };
+    },
+
+    // The pending approvals, with their codes. This one is safe for the
+    // agent to read: the codes are shown to the human on the controlling
+    // terminal, not to the agent.
     'approve.list': async () => ({
-      data: { pending: approvals.listPending() },
+      data: {
+        pending: approvals.listPending().map((entry) => ({
+          ...entry,
+          code: approverChannel.get(entry.actionId)?.code,
+        })),
+      },
+    }),
+
+    // The pending approvals that are waiting for a human, including their
+    // codes. The agent may read this so it can TELL the human which code
+    // to enter.
+    'approve.waiting': async () => ({
+      data: { waiting: approverChannel.list() },
     }),
 
     // --- Rewind -----------------------------------------------------------
@@ -677,6 +778,40 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
       if (!verdict.allowed) {
         const exitCode =
           verdict.next === 'needs_approval' ? EXIT.NEEDS_APPROVAL : EXIT.POLICY_DENIED;
+
+        // A pending approval gets a short code, so a human can approve it
+        // from their own terminal without the agent ever holding a
+        // credential. The code is shown on the controlling terminal.
+        let approvalCode: string | undefined;
+        if (verdict.approval !== undefined) {
+          const entry = approverChannel.add(
+            verdict.approval.actionId,
+            verdict.approval.actionHash,
+            verdict.approval.description,
+          );
+          approvalCode = entry.code;
+
+          // Show the prompt on the controlling terminal. The agent's
+          // process has no handle on that descriptor, so it cannot read
+          // the code from here.
+          const tty = await getTerminal();
+          const shown = await tty.write(
+            approvalPrompt({
+              actionId: verdict.approval.actionId,
+              code: entry.code,
+              description: verdict.approval.description,
+              url: currentUrl,
+            }),
+          );
+          if (!shown && !terminalWarningShown) {
+            terminalWarningShown = true;
+            await tty.write(
+              '  bv: no controlling terminal is available, so the approval code ' +
+                'cannot be shown here.\n',
+            );
+          }
+        }
+
         return {
           data: {
             ok: false,
@@ -689,6 +824,7 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
               ? {
                   approvalId: verdict.approval.actionId,
                   approvalDescription: verdict.approval.description,
+                  ...(approvalCode !== undefined ? { approvalCode } : {}),
                 }
               : {}),
           },
@@ -903,11 +1039,18 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
     recorder,
     getSession,
   });
+  // The approver credential is separate from the daemon token, and it
+  // lives in a file the agent's process never reads. The daemon checks it
+  // before any approval method runs.
+  const approverCredential = await ApproverCredential.load(options.cwd);
+
   const daemon = await startDaemon({
     handlers,
     session: options.session,
     headed: options.headed,
     browser: 'chromium',
+    approverCredential,
+    approverMethods: APPROVER_METHODS,
   });
 
   const info: DaemonInfo = daemon.info;

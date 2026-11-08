@@ -16,6 +16,7 @@ import { once } from 'node:events';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { hashToken, tokenMatches, type DaemonInfo } from './daemon-info.js';
 import { VERSION } from '../version.js';
+import type { ApproverCredential } from '../safety/approver.js';
 
 /** The request body of a daemon API call. */
 export interface DaemonRequest {
@@ -61,6 +62,21 @@ export interface DaemonOptions {
   pid?: number;
   /** Maximum request body size in bytes. Default 32 MiB (screenshots, HAR). */
   maxBodyBytes?: number;
+  /**
+   * The approver credential.
+   *
+   * The agent holds the daemon token, so the daemon token alone must not
+   * be enough to mint an approval. This is a separate secret, in a file
+   * the agent's process never reads.
+   */
+  approverCredential?: ApproverCredential;
+  /**
+   * The methods that need the approver credential.
+   *
+   * Defaults to the approval methods. A method listed here is refused
+   * with 403 unless the request carries the approver credential.
+   */
+  approverMethods?: ReadonlySet<string>;
 }
 
 /** The running daemon. */
@@ -200,6 +216,38 @@ async function handleRequest(
     if (handler === undefined) {
       send(404, { ok: false, error: `unknown method: ${parsed.method}` });
       return;
+    }
+
+    // --- The approver credential ---------------------------------------------
+    // Some methods need a human, not just a client. The agent holds the
+    // daemon token, so the daemon token alone is NOT enough to mint an
+    // approval. The approver credential is a separate secret, in a file
+    // the agent's process never reads.
+    //
+    // This is checked HERE, before the handler runs, so no handler can
+    // accidentally forget to check it.
+    if (options.approverMethods?.has(parsed.method) === true) {
+      const approverHeader = req.headers['x-bv-approver'];
+      const presentedApprover = typeof approverHeader === 'string' ? approverHeader : '';
+
+      if (options.approverCredential === undefined) {
+        send(403, {
+          ok: false,
+          error: 'this daemon has no approver credential, so it cannot approve anything',
+        });
+        return;
+      }
+
+      if (!options.approverCredential.matches(presentedApprover)) {
+        send(403, {
+          ok: false,
+          error:
+            'this action needs a human approval. The agent token cannot approve it: ' +
+            'run `bv approve` from the operator terminal, or enter the one-time code ' +
+            'shown there.',
+        });
+        return;
+      }
     }
 
     const result = await handler(parsed);
