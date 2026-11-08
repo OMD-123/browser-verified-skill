@@ -122,6 +122,38 @@ describe('the published artifact', () => {
     expect(skill).toContain('description:');
   });
 
+  it('installs the native binding for every platform rolldown publishes', async () => {
+    // rolldown ships its native binding as an optional dependency, one
+    // package per platform. npm has a bug with optional dependencies
+    // (npm/cli#4828): a lockfile generated on one platform resolves only
+    // that platform's package, so CI on another platform fails with
+    // 'Cannot find native binding'.
+    //
+    // The postinstall script installs the missing one explicitly, so it
+    // has to know the name of every binding rolldown publishes.
+    const script = await readFile(join(ROOT, 'scripts', 'ensure-native-binding.mjs'), 'utf8');
+
+    const rolldownManifest = JSON.parse(
+      await readFile(join(ROOT, 'node_modules', 'rolldown', 'package.json'), 'utf8'),
+    ) as { optionalDependencies?: Record<string, string> };
+
+    const bindings = Object.keys(rolldownManifest.optionalDependencies ?? {}).filter((name) =>
+      name.includes('binding-'),
+    );
+    expect(bindings.length).toBeGreaterThan(0);
+
+    const missing = bindings.filter((name) => !script.includes(name.replace('@rolldown/', '')));
+    expect(missing, `the postinstall does not handle: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('runs the postinstall as part of the install', async () => {
+    const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(manifest.scripts?.['postinstall']).toContain('ensure-native-binding');
+  });
+
   it('pins playwright and @playwright/test to the same version', async () => {
     // A caret on @playwright/test let it resolve to a NEWER version than
     // the pinned `playwright`, and the two disagreed about which Chromium

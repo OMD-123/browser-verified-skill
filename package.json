@@ -68,6 +68,7 @@
   "files": [
     "scripts/bv.mjs",
     "scripts/acceptance.mjs",
+    "scripts/ensure-native-binding.mjs",
     "policies/",
     "references/",
     "skills/",
@@ -78,6 +79,7 @@
     "docs/KNOWN_LIMITATIONS.md"
   ],
   "scripts": {
+    "postinstall": "node scripts/ensure-native-binding.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
