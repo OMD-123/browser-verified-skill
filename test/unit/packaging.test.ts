@@ -122,6 +122,28 @@ describe('the published artifact', () => {
     expect(skill).toContain('description:');
   });
 
+  it('pins playwright and @playwright/test to the same version', async () => {
+    // A caret on @playwright/test let it resolve to a NEWER version than
+    // the pinned `playwright`, and the two disagreed about which Chromium
+    // build to download. CI installed chromium-1254 while the code looked
+    // for chromium-1248, so every browser test failed to launch.
+    const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+
+    const playwright = manifest.dependencies['playwright'];
+    const test = manifest.devDependencies['@playwright/test'];
+
+    expect(playwright).toBeDefined();
+    expect(test).toBeDefined();
+
+    // Both must be exact pins, and the same exact pin.
+    expect(playwright).not.toMatch(/[~^><*]|\s-\s/);
+    expect(test).not.toMatch(/[~^><*]|\s-\s/);
+    expect(test).toBe(playwright);
+  });
+
   it('does not depend on a package it does not use', async () => {
     const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>;
