@@ -79,7 +79,7 @@
     "docs/KNOWN_LIMITATIONS.md"
   ],
   "scripts": {
-    "postinstall": "node scripts/ensure-native-binding.mjs",
+    "postinstall": "node scripts/ensure-native-binding.mjs || exit 0",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
