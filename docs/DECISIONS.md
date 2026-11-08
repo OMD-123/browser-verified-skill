@@ -401,18 +401,43 @@ lowering it elsewhere.
 
 ---
 
-## D-0023 — `better-sqlite3` is used for the playbook store (synchronous, embedded)
+## D-0023 — The playbook store is a JSON file, not a database
 
-**Decision.** `better-sqlite3@13.0.3` with the prebuilt binary (verified working
-on this host's Node 22).
+**Decision.** The site memory is stored as a single JSON file, written
+atomically (to a temporary file, then renamed over the original).
+
+**Amendment (v1.0.0).** This decision originally chose `better-sqlite3@13.0.3`.
+It was reversed, and the reason is worth recording.
+
+**Why it was reversed.** `better-sqlite3` is a native module. On a CI runner
+without a compiler toolchain, `npm ci` fails at `node-gyp rebuild` — which
+means the project's own CI could not install its own dependencies on Windows.
+The workaround (`npm ci --ignore-scripts`) broke a different dependency:
+vitest's bundler, rolldown, resolves its native binding through an install
+script, so skipping the scripts left it without one and every test failed to
+start. The second fix was regenerating `package-lock.json` from scratch,
+which resolved all fifteen platform-specific rolldown bindings instead of
+only the host's.
+
+Neither fix was good. The root cause was a native dependency at all, for a
+workload that never needed a query engine: the store is a handful of
+key-value entries per origin, read once and written once.
 
 **Alternatives rejected.** `node:sqlite` (built into Node 22): still flagged
-experimental in 22.x and its API differs; `sql.js` (WASM): in-memory only,
-needs manual persistence.
+experimental, and its API differs. Keeping `better-sqlite3` and requiring a
+compiler on every user's machine: a browser-automation toolkit that cannot
+install without Visual Studio is a broken toolkit. A pure-JS SQLite in WASM:
+still a large dependency for a key-value cache.
 
-**Reason.** The playbook store is small, local, and read on nearly every action
-(selector confidence lookups). Synchronous access keeps the action path simple
-and avoids an async DB layer in the hottest code path.
+**Reason.** The store's operations are `get`, `set`, `delete`, `list` and
+`prune-expired`. None of them is a query. The JSON file is smaller than the
+SQLite dependency, has no native code, and reads synchronously — which was
+the original reason for choosing SQLite in the first place.
+
+**Consequence.** The store is loaded lazily and saved on every mutation, so
+the file on disk is always current. A corrupt file is discarded rather than
+fatal: the memory is a cache, and losing it costs a re-discovery, not data.
+The `prune` operation is explicit (`bv memory prune`) rather than automatic.
 
 ---
 

@@ -132,7 +132,7 @@ function vaultPath(cwd = process.cwd()) {
   return join2(bvRoot(cwd), "vault.enc");
 }
 function playbooksPath(cwd = process.cwd()) {
-  return join2(bvRoot(cwd), "playbooks.sqlite");
+  return join2(bvRoot(cwd), "playbooks.json");
 }
 function daemonInfoPath(cwd = process.cwd()) {
   return join2(bvRoot(cwd), "daemon.json");
@@ -6985,8 +6985,7 @@ init_planlock();
 
 // src/memory/playbooks.ts
 init_paths();
-import Database from "better-sqlite3";
-import { mkdirSync } from "fs";
+import { mkdirSync, readFileSync as readFileSync2, renameSync, writeFileSync, existsSync as existsSync4 } from "fs";
 import { dirname as dirname6 } from "path";
 var DEFAULT_TTL_DAYS = 30;
 var Playbooks = class {
@@ -6996,33 +6995,39 @@ var Playbooks = class {
   }
   cwd;
   options;
-  db;
-  /** Open the database and make sure the schema exists. */
-  open() {
-    if (this.db !== void 0) return this.db;
+  entries;
+  /** Load the store from disk. */
+  load() {
+    if (this.entries !== void 0) return this.entries;
+    const entries = /* @__PURE__ */ new Map();
+    const path = playbooksPath(this.cwd);
+    if (existsSync4(path)) {
+      try {
+        const parsed = JSON.parse(readFileSync2(path, "utf8"));
+        if (parsed.version === 1 && typeof parsed.entries === "object") {
+          for (const entry of Object.values(parsed.entries)) {
+            entries.set(storeKey(entry.origin, entry.key), entry);
+          }
+        }
+      } catch {
+        entries.clear();
+      }
+    }
+    this.entries = entries;
+    return entries;
+  }
+  /** Write the store to disk, atomically. */
+  save() {
+    const entries = this.load();
     const path = playbooksPath(this.cwd);
     mkdirSync(dirname6(path), { recursive: true });
-    const db = new Database(path);
-    db.pragma("journal_mode = WAL");
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS playbooks (
-        origin          TEXT NOT NULL,
-        key             TEXT NOT NULL,
-        value           TEXT NOT NULL,
-        confidence      REAL NOT NULL DEFAULT 1.0,
-        last_verified_at TEXT NOT NULL,
-        expires_at      TEXT NOT NULL,
-        PRIMARY KEY (origin, key)
-      );
-      CREATE INDEX IF NOT EXISTS playbooks_expiry ON playbooks (expires_at);
-    `);
-    this.db = db;
-    return db;
+    const file = { version: 1, entries: Object.fromEntries(entries) };
+    const temporary = `${path}.tmp`;
+    writeFileSync(temporary, JSON.stringify(file, null, 2), "utf8");
+    renameSync(temporary, path);
   }
-  /** Close the database. */
+  /** Close the store. The file is already written, so this is a no-op. */
   close() {
-    this.db?.close();
-    this.db = void 0;
   }
   /**
    * Remember something.
@@ -7030,22 +7035,13 @@ var Playbooks = class {
    * Storing an existing key refreshes it and raises its confidence.
    */
   remember(origin, key, value) {
-    const db = this.open();
+    const entries = this.load();
     const now = /* @__PURE__ */ new Date();
     const ttlDays = this.options.ttlDays ?? DEFAULT_TTL_DAYS;
     const expiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1e3);
-    const existing = db.prepare("SELECT confidence FROM playbooks WHERE origin = ? AND key = ?").get(origin, key);
+    const existing = entries.get(storeKey(origin, key));
     const confidence = Math.min(1, (existing?.confidence ?? 0.5) + 0.1);
-    db.prepare(
-      `INSERT INTO playbooks (origin, key, value, confidence, last_verified_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(origin, key) DO UPDATE SET
-         value = excluded.value,
-         confidence = excluded.confidence,
-         last_verified_at = excluded.last_verified_at,
-         expires_at = excluded.expires_at`
-    ).run(origin, key, value, confidence, now.toISOString(), expiresAt.toISOString());
-    return {
+    const entry = {
       origin,
       key,
       value,
@@ -7053,6 +7049,9 @@ var Playbooks = class {
       lastVerifiedAt: now.toISOString(),
       expiresAt: expiresAt.toISOString()
     };
+    entries.set(storeKey(origin, key), entry);
+    this.save();
+    return entry;
   }
   /**
    * Look something up.
@@ -7060,21 +7059,15 @@ var Playbooks = class {
    * An expired entry is not returned, and is deleted as it is found.
    */
   recall(origin, key) {
-    const db = this.open();
-    const row = db.prepare("SELECT * FROM playbooks WHERE origin = ? AND key = ?").get(origin, key);
-    if (row === void 0) return void 0;
-    if (Date.parse(row.expires_at) <= Date.now()) {
+    const entries = this.load();
+    const storeKeyValue = storeKey(origin, key);
+    const entry = entries.get(storeKeyValue);
+    if (entry === void 0) return void 0;
+    if (Date.parse(entry.expiresAt) <= Date.now()) {
       this.forget(origin, key);
       return void 0;
     }
-    return {
-      origin: row.origin,
-      key: row.key,
-      value: row.value,
-      confidence: row.confidence,
-      lastVerifiedAt: row.last_verified_at,
-      expiresAt: row.expires_at
-    };
+    return entry;
   }
   /**
    * Record that something stopped working.
@@ -7083,7 +7076,6 @@ var Playbooks = class {
    * forgotten, so a broken selector is not carried forward.
    */
   recordFailure(origin, key) {
-    const db = this.open();
     const entry = this.recall(origin, key);
     if (entry === void 0) return void 0;
     const confidence = entry.confidence - 0.25;
@@ -7091,49 +7083,50 @@ var Playbooks = class {
       this.forget(origin, key);
       return void 0;
     }
-    db.prepare("UPDATE playbooks SET confidence = ? WHERE origin = ? AND key = ?").run(
-      confidence,
-      origin,
-      key
-    );
+    const entries = this.load();
+    entries.set(storeKey(origin, key), { ...entry, confidence });
+    this.save();
     return { ...entry, confidence };
   }
   /** Forget one entry. */
   forget(origin, key) {
-    const db = this.open();
-    const result = db.prepare("DELETE FROM playbooks WHERE origin = ? AND key = ?").run(origin, key);
-    return result.changes > 0;
+    const entries = this.load();
+    const removed = entries.delete(storeKey(origin, key));
+    if (removed) this.save();
+    return removed;
   }
   /** Every entry for an origin. */
   list(origin) {
-    const db = this.open();
-    const rows = origin === void 0 ? db.prepare("SELECT * FROM playbooks ORDER BY origin, key").all() : db.prepare("SELECT * FROM playbooks WHERE origin = ? ORDER BY key").all(origin);
-    return rows.map((row) => ({
-      origin: row.origin,
-      key: row.key,
-      value: row.value,
-      confidence: row.confidence,
-      lastVerifiedAt: row.last_verified_at,
-      expiresAt: row.expires_at
-    }));
+    const entries = this.load();
+    return [...entries.values()].filter((entry) => origin === void 0 || entry.origin === origin).sort((a, b) => a.origin.localeCompare(b.origin) || a.key.localeCompare(b.key));
   }
   /** Remove every expired entry. */
   prune() {
-    const db = this.open();
-    const result = db.prepare("DELETE FROM playbooks WHERE expires_at <= ?").run((/* @__PURE__ */ new Date()).toISOString());
-    return result.changes;
+    const entries = this.load();
+    const now = Date.now();
+    let removed = 0;
+    for (const [key, entry] of [...entries]) {
+      if (Date.parse(entry.expiresAt) <= now) {
+        entries.delete(key);
+        removed += 1;
+      }
+    }
+    if (removed > 0) this.save();
+    return removed;
   }
   /** How many entries are stored. */
   count() {
-    const db = this.open();
-    const row = db.prepare("SELECT COUNT(*) AS n FROM playbooks").get();
-    return row.n;
+    return this.load().size;
   }
   /** Remove every entry. */
   clear() {
-    this.open().exec("DELETE FROM playbooks");
+    this.entries = /* @__PURE__ */ new Map();
+    this.save();
   }
 };
+function storeKey(origin, key) {
+  return `${origin} ${key}`;
+}
 function renderPlaybooks(entries) {
   if (entries.length === 0) return "(the playbook is empty)";
   const lines = [];

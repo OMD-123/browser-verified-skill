@@ -2,7 +2,7 @@
  * Tests for the site memory (M16).
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -136,6 +136,41 @@ describe('the playbook store', () => {
     const second = new Playbooks(dir);
     expect(second.recall('https://example.test', 'k')?.value).toBe('v');
     second.close();
+  });
+
+  it('writes the store to a JSON file', async () => {
+    playbooks.remember('https://example.test', 'selector:login', 'role=button');
+    const raw = await readFile(join(dir, '.bv', 'playbooks.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { version: number; entries: Record<string, unknown> };
+    expect(parsed.version).toBe(1);
+    expect(Object.keys(parsed.entries)).toHaveLength(1);
+  });
+
+  it('recovers from a corrupt store rather than failing', async () => {
+    await mkdir(join(dir, '.bv'), { recursive: true });
+    await writeFile(join(dir, '.bv', 'playbooks.json'), 'not json at all', 'utf8');
+    const fresh = new Playbooks(dir);
+    expect(fresh.count()).toBe(0);
+    // The store still works afterwards.
+    fresh.remember('https://example.test', 'selector:login', 'role=button');
+    expect(fresh.count()).toBe(1);
+  });
+
+  it('ignores a store written by a future version', async () => {
+    await mkdir(join(dir, '.bv'), { recursive: true });
+    await writeFile(
+      join(dir, '.bv', 'playbooks.json'),
+      JSON.stringify({ version: 99, entries: { 'x y': { origin: 'x', key: 'y' } } }),
+      'utf8',
+    );
+    const fresh = new Playbooks(dir);
+    expect(fresh.count()).toBe(0);
+  });
+
+  it('leaves no temporary file behind after a write', async () => {
+    playbooks.remember('https://example.test', 'selector:login', 'role=button');
+    const files = await readdir(join(dir, '.bv'));
+    expect(files.filter((file) => file.endsWith('.tmp'))).toEqual([]);
   });
 
   it('uses a default lifetime of thirty days', () => {

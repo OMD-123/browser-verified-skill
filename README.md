@@ -576,8 +576,11 @@ bv doctor
 ```
 
 Requires **Node.js 20+** and **Chromium** (installed by Playwright). macOS, Linux and
-Windows are supported. The only native dependency, `better-sqlite3`, ships prebuilt
-binaries for all three — there is no compiler step.
+Windows are supported.
+
+**There are no native dependencies.** No compiler, no build step, no `node-gyp`. The
+site-memory store is a JSON file written atomically, and everything else is pure
+TypeScript.
 
 ### From source
 

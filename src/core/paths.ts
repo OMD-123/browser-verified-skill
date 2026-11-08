@@ -6,7 +6,7 @@
  *   .bv/
  *   ├── policy.yaml
  *   ├── vault.enc
- *   ├── playbooks.sqlite
+ *   ├── playbooks.json
  *   ├── daemon.json      (port, token hash, pid)
  *   ├── daemon.token     (bearer token, mode 0600)
  *   └── runs/<runId>/
@@ -39,9 +39,9 @@ export function vaultPath(cwd: string = process.cwd()): string {
   return join(bvRoot(cwd), 'vault.enc');
 }
 
-/** Path of the playbook database. */
+/** Path of the playbook store. */
 export function playbooksPath(cwd: string = process.cwd()): string {
-  return join(bvRoot(cwd), 'playbooks.sqlite');
+  return join(bvRoot(cwd), 'playbooks.json');
 }
 
 /** Path of the daemon descriptor. */

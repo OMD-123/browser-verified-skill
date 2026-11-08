@@ -118,11 +118,22 @@ Issues found by the project's own tests and acceptance script during development
 - Redaction is applied at the sink, not only at the source.
 - `bv` is a thin HTTP client; the daemon owns the browser.
 
+### Changed
+
+- **The site-memory store is a JSON file, not SQLite.** `better-sqlite3` was a native
+  dependency, and a native dependency means the project's own CI could not install its
+  own dependencies on a runner without a compiler toolchain. The store's operations
+  are `get`, `set`, `delete`, `list` and `prune-expired` — none of them is a query — so
+  the database was the wrong tool. The file is written atomically, so a crash mid-write
+  cannot leave a half-written store behind.
+
 ### Removed
 
 - Dead runtime dependencies: `p-limit`, `pino`, `pixelmatch`, `pngjs`.
 - The unused `@modelcontextprotocol/sdk` dependency — the MCP server implements the
   protocol directly.
+- `better-sqlite3` and `@types/better-sqlite3`. **There are now no native
+  dependencies at all** — no compiler, no build step, no `node-gyp`.
 
 ---
 

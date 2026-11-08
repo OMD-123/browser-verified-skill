@@ -148,7 +148,7 @@ route through MCP that skips a check.
 
 ### `src/memory/` — playbooks and skills
 
-The site memory (playbooks, in SQLite) and the skills. A skill is **data**,
+The site memory (playbooks, as an atomically-written JSON file) and the skills. A skill is **data**,
 not code: markdown with a frontmatter block, read at runtime, so it can be
 reviewed and corrected by the person who knows the site without a rebuild.
 
