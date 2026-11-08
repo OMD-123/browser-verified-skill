@@ -138,6 +138,29 @@ describe('the playbook store', () => {
     second.close();
   });
 
+  it('lists every entry when no origin is given', () => {
+    playbooks.remember('https://a.test', 'k1', 'v1');
+    playbooks.remember('https://b.test', 'k2', 'v2');
+    expect(playbooks.list()).toHaveLength(2);
+  });
+
+  it('sorts the entries by origin and then by key', () => {
+    playbooks.remember('https://b.test', 'k2', 'v2');
+    playbooks.remember('https://a.test', 'k2', 'v2');
+    playbooks.remember('https://a.test', 'k1', 'v1');
+    expect(playbooks.list().map((entry) => `${entry.origin} ${entry.key}`)).toEqual([
+      'https://a.test k1',
+      'https://a.test k2',
+      'https://b.test k2',
+    ]);
+  });
+
+  it('prunes nothing when nothing has expired', () => {
+    playbooks.remember('https://example.test', 'k', 'v');
+    expect(playbooks.prune()).toBe(0);
+    expect(playbooks.count()).toBe(1);
+  });
+
   it('writes the store to a JSON file', async () => {
     playbooks.remember('https://example.test', 'selector:login', 'role=button');
     const raw = await readFile(join(dir, '.bv', 'playbooks.json'), 'utf8');
