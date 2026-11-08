@@ -218,6 +218,86 @@ describe('the published artifact', () => {
     }
   });
 
+  it('has the command count the README claims', async () => {
+    // The README says "27 commands". If a command is added or removed,
+    // that number is wrong, and a reader who counts will notice.
+    const { stdout } = await exec(process.execPath, [join(ROOT, 'scripts', 'bv.mjs'), '--help']);
+
+    const commands = stdout
+      .split('\n')
+      .filter((line) => /^ {2}[a-z]/.test(line))
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((name) => name !== 'help');
+
+    expect(commands.length).toBe(26);
+
+    const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+    expect(readme).toContain(`${commands.length} commands`);
+  });
+
+  it('documents every command in the reference doc', async () => {
+    // The reference doc is where a user is pointed for "the complete
+    // reference". Seven commands were missing from it, so a reader would
+    // have gone looking for bv doctor and bv test and found nothing.
+    const { stdout } = await exec(process.execPath, [join(ROOT, 'scripts', 'bv.mjs'), '--help']);
+
+    const commands = stdout
+      .split('\n')
+      .filter((line) => /^ {2}[a-z]/.test(line))
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((name) => name !== 'help');
+
+    const reference = await readFile(join(ROOT, 'references', 'commands.md'), 'utf8');
+
+    const missing = commands.filter((name) => !reference.includes(`bv ${name}`));
+    expect(
+      missing,
+      `these commands are not in references/commands.md: ${missing.join(', ')}`,
+    ).toEqual([]);
+
+    // The README's command table too. bv dryrun-report was missing from
+    // it, so a reader working from the README never found it.
+    const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+    const missingFromReadme = commands.filter((name) => !readme.includes(`bv ${name}`));
+    expect(
+      missingFromReadme,
+      `these commands are not in the README: ${missingFromReadme.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('has the acceptance-claim count the README claims', async () => {
+    // The README says the acceptance script checks "17 claims".
+    const script = await readFile(join(ROOT, 'scripts', 'acceptance.mjs'), 'utf8');
+    const claims = script.match(/await claim\(/g) ?? [];
+
+    expect(claims.length).toBe(17);
+
+    const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+    expect(readme).toContain(`**${claims.length} claims**`);
+  });
+
+  it('has no native dependencies, as the README claims', async () => {
+    // The README says there are no native dependencies. A native
+    // dependency is one that compiles, which is the thing that broke CI.
+    const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+
+    const all = { ...manifest.dependencies, ...(manifest.optionalDependencies ?? {}) };
+
+    // The known native modules. If one is added, the README is wrong and
+    // CI will need a toolchain again.
+    const native = ['better-sqlite3', 'sharp', 'canvas', 'node-sass', 'bcrypt', 'sqlite3'];
+
+    for (const name of Object.keys(all)) {
+      expect(
+        native.includes(name),
+        `"${name}" is a native dependency, and the README says there are none`,
+      ).toBe(false);
+    }
+  });
+
   it('does not depend on a package it does not use', async () => {
     const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>;

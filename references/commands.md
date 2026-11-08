@@ -19,6 +19,13 @@ meaningful exit code.
 the policy. Exit 4 is "ask a human". Exit 6 is "unverified", not
 "failed".
 
+## Setup
+
+```bash
+bv doctor [--install]       # check node, the browser, the permissions and the policy
+bv init                     # create .bv/ and write a default policy
+```
+
 ## The sessions
 
 ```bash
@@ -33,7 +40,9 @@ local HTTP API with a bearer token.
 ## Reading the page
 
 ```bash
+bv goto <url>                    # navigate
 bv snapshot [--full] [--max-tokens N] [--expand ref]
+bv tab list|select|close         # tabs and popups
 ```
 
 The output is a **diff** against the previous snapshot: what changed, not
@@ -79,6 +88,12 @@ thing the plan exists to prevent.
 bv approve <actionId>
 ```
 
+## The dry run
+
+```bash
+bv dryrun-report [--run <runId>]   # what would have been sent, from the last dry run
+```
+
 Prints a one-time token bound to that exact action. Use it with
 `--approve` on the action it was issued for.
 
@@ -93,6 +108,16 @@ bv vault rm <name>
 The passphrase comes from `BV_VAULT_PASSPHRASE`. A secret is referenced
 in an action with `{{secret:name}}` and is resolved **only inside the
 daemon**, at the moment of the fill.
+
+## QA
+
+```bash
+bv test --suite f.json [--tag t]                   # run a suite of checks
+bv redteam run                                     # test the tool's own guards
+bv diff --a <url> --b <url>                        # compare two pages' trees
+bv discover-api <runId> [--openapi]                # the endpoints the run actually used
+bv research --questions q.json --sources urls.txt  # answer questions from sources
+```
 
 ## Proof
 

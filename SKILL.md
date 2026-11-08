@@ -128,10 +128,21 @@ and reports the change as drift.
 ## More
 
 - `bv doctor` — check the environment
+- `bv init` — create `.bv/` and write a default policy
+- `bv tab list|select|close` — tabs and popups
+- `bv vault set|list|rm` — the encrypted secrets store
 - `bv memory ls` — what the tool remembers about a site
 - `bv diff --a URL --b URL` — compare two pages' accessibility trees
+- `bv test --suite f.json` — run declarative checks against a site
+- `bv redteam run` — test the tool's own guards
 - `bv report <runId>` — what a run found, as Markdown or JSON
+- `bv audit [runId]` — the audit log of a run
+- `bv rewind --to N` — branch a run from an earlier step
+- `bv drift <runId>` — what changed since the recording
 - `bv mcp` — serve the tools over the Model Context Protocol
+
+**The complete command reference is in `references/commands.md`.** Read it
+when you need a command this file does not mention.
 
 ## The honest limits
 
