@@ -176,6 +176,48 @@ describe('the published artifact', () => {
     expect(test).toBe(playwright);
   });
 
+  it('has no coverage exclusions outside the browser callbacks', async () => {
+    // The project excludes a few regions from the coverage requirement
+    // with `v8 ignore`. Each one has to be justified: it is either code
+    // that runs inside the browser (which the coverage tool cannot see),
+    // or a safety net for a future change that is unreachable today.
+    //
+    // This test reads every exclusion and checks that it carries a
+    // reason. A bare `v8 ignore` with no explanation is a hole.
+    const files = await collectTypeScript(join(ROOT, 'src'));
+
+    for (const file of files) {
+      const source = await readFile(file, 'utf8');
+      const lines = source.split('\n');
+
+      lines.forEach((line, index) => {
+        if (!line.includes('v8 ignore')) return;
+
+        // A `stop` marker closes a region that a `start` marker opened,
+        // so it carries no reason of its own. The start marker does.
+        if (line.includes('v8 ignore stop')) return;
+
+        // The exclusion must say why. The reason is in the comment block
+        // above it, so the whole block is read rather than just the line
+        // before.
+        const context = lines
+          .slice(Math.max(0, index - 8), index + 1)
+          .join(' ')
+          .toLowerCase();
+        const justified =
+          context.includes('browser') ||
+          context.includes('unreachable') ||
+          context.includes('safety net') ||
+          context.includes('future change');
+
+        expect(
+          justified,
+          `${file.replace(ROOT, '.')}:${index + 1} excludes code without a reason: ${line.trim()}`,
+        ).toBe(true);
+      });
+    }
+  });
+
   it('does not depend on a package it does not use', async () => {
     const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>;
@@ -200,6 +242,33 @@ describe('the published artifact', () => {
     }
   });
 });
+
+/**
+ * Every TypeScript file under a directory.
+ */
+async function collectTypeScript(directory: string): Promise<string[]> {
+  const { readdir } = await import('node:fs/promises');
+  const path = await import('node:path');
+
+  const found: string[] = [];
+  let entries: { name: string; isDirectory(): boolean }[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...(await collectTypeScript(entryPath)));
+      continue;
+    }
+    if (entry.name.endsWith('.ts')) found.push(entryPath);
+  }
+
+  return found;
+}
 
 /**
  * Whether a module is imported anywhere under a directory.
