@@ -265,6 +265,42 @@ describe('the published artifact', () => {
     ).toEqual([]);
   });
 
+  it('says only what is true about what is not built', async () => {
+    // The KNOWN_LIMITATIONS file lists five things that are not built.
+    // If one of them gets built, that list becomes a lie, and a reader
+    // would look for a command that does not exist.
+    const { stdout } = await exec(process.execPath, [join(ROOT, 'scripts', 'bv.mjs'), '--help']);
+
+    const commandNames = stdout
+      .split('\n')
+      .filter((line) => /^ {2}[a-z]/.test(line))
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((name) => name !== 'help');
+
+    const limitations = await readFile(join(ROOT, 'docs', 'KNOWN_LIMITATIONS.md'), 'utf8');
+
+    const start = limitations.indexOf('## Not built yet');
+    const section = limitations.slice(start, limitations.indexOf('\n## ', start + 10));
+
+    // Every command named in that section as missing must really be
+    // missing.
+    for (const name of ['run', 'eval', 'resume']) {
+      if (!section.includes(`bv ${name}`)) continue;
+      expect(
+        commandNames.includes(name),
+        `the limitations say "bv ${name}" is not built, but it is`,
+      ).toBe(false);
+    }
+
+    // And the claim that no LlmClient implementation talks to a provider.
+    const llmSource = await readFile(join(ROOT, 'src', 'llm', 'client.ts'), 'utf8');
+    const implementations = [...llmSource.matchAll(/implements LlmClient/g)].length;
+    // The only one is UnavailableClient, which always rejects.
+    expect(implementations).toBe(1);
+    expect(llmSource).toContain('class UnavailableClient implements LlmClient');
+    expect(llmSource).toContain('the model client is not available');
+  });
+
   it('has the acceptance-claim count the README claims', async () => {
     // The README says the acceptance script checks "17 claims".
     const script = await readFile(join(ROOT, 'scripts', 'acceptance.mjs'), 'utf8');
