@@ -49,7 +49,11 @@ describe('the MCP server against a real daemon', () => {
     session = new BrowserSession({
       store,
       userAgent: 'BrowserVerifiedSkill/1.0 (+@url:`https://example.test/contact`)',
-      headed: true,
+      // Headless. A CI runner has no display, so a headed browser cannot
+      // launch there. The approval path this test exercises works in a
+      // headless session too: the action is refused with an approval id,
+      // and the operator approves it out of band.
+      headed: false,
     });
     await session.launch();
 
@@ -61,10 +65,10 @@ describe('the MCP server against a real daemon', () => {
       runId: 'mcp-run',
       store,
       cwd: dir,
-      // A headed session is an interactive one, so an action that needs
-      // approval asks for one rather than being denied outright. That is
+      // A headless session asks for an approval rather than denying
+      // outright, so the action is refused with an approval id. That is
       // the path the MCP test needs to exercise.
-      headed: true,
+      headed: false,
       policy: policy(),
       planLock,
       approvals,
