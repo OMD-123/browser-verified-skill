@@ -117,12 +117,26 @@ export function registerPerception(program: Command): void {
     .option('--dry-run', 'report what would happen without doing it', false)
     .option('--force', 'skip actionability checks', false)
     .option('--approve <token>', 'an approval token for this exact action')
+    .option(
+      '--from-ref <ref>',
+      'the value comes from this snapshot ref (e12). The value is page-derived, so it is treated as untrusted.',
+    )
+    .option(
+      '--from-extract <field>',
+      'the value comes from this extracted field. The value is page-derived, so it is treated as untrusted.',
+    )
     .action(
       async (
         kind: string,
         target: string,
         value: string | undefined,
-        options: { dryRun?: boolean; force?: boolean; approve?: string },
+        options: {
+          dryRun?: boolean;
+          force?: boolean;
+          approve?: string;
+          fromRef?: string;
+          fromExtract?: string;
+        },
         cmd: Command,
       ) => {
         const global = globalOptions(cmd);
@@ -162,6 +176,13 @@ export function registerPerception(program: Command): void {
             ...(value !== undefined ? { value } : {}),
             force: options.force === true,
             ...(typeof options.approve === 'string' ? { approvalToken: options.approve } : {}),
+            // The daemon resolves the page-derived value and taints it.
+            // The CLI never sends the value itself, so the agent cannot
+            // pass a trusted string by calling the daemon directly.
+            ...(typeof options.fromRef === 'string' ? { fromRef: options.fromRef } : {}),
+            ...(typeof options.fromExtract === 'string'
+              ? { fromExtract: options.fromExtract }
+              : {}),
           });
 
           // A refusal from the safety gate is reported differently from a

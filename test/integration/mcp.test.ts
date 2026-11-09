@@ -123,6 +123,7 @@ describe('the MCP server against a real daemon', () => {
       allowedOrigins: [FIXTURE],
       allowedActionClasses: ['read', 'navigate', 'submit', 'input'],
       maxSteps: 20,
+      trustedValues: [],
       createdAt: new Date().toISOString(),
     });
   });

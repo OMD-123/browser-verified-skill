@@ -75,6 +75,16 @@ export const PlanSchema = z
     allowedOrigins: z.array(z.string().min(1)).default([]),
     allowedActionClasses: z.array(z.enum(ACTION_CLASSES)).default([]),
     maxSteps: z.number().int().positive().default(80),
+    /**
+     * Literal values a human confirmed in the plan.
+     *
+     * A value typed by the agent is not trusted. A value the human put
+     * in the plan, and then approved, is: the human read it and said so.
+     *
+     * This is the only way a literal string reaches a sink without an
+     * approval.
+     */
+    trustedValues: z.array(z.string().min(1)).default([]),
     createdAt: z.string().min(1),
   })
   .strict();
@@ -104,6 +114,8 @@ export function createPlan(input: {
   allowedOrigins?: readonly string[];
   allowedActionClasses?: readonly ActionClass[];
   maxSteps?: number;
+  /** Literal values a human confirmed in the plan. */
+  trustedValues?: readonly string[];
   createdAt?: string;
 }): Plan {
   return PlanSchema.parse({
@@ -113,6 +125,7 @@ export function createPlan(input: {
     allowedActionClasses:
       input.allowedActionClasses === undefined ? [] : [...input.allowedActionClasses],
     maxSteps: input.maxSteps === undefined ? 80 : input.maxSteps,
+    trustedValues: input.trustedValues === undefined ? [] : [...input.trustedValues],
     createdAt: input.createdAt === undefined ? new Date().toISOString() : input.createdAt,
   });
 }
@@ -248,6 +261,17 @@ export class PlanLock {
     }
 
     return { allowed: true };
+  }
+
+  /**
+   * Whether a literal value was confirmed by a human in the plan.
+   *
+   * The plan is set by the operator and shown to them before it is
+   * locked. A value in `trustedValues` is one the human read and
+   * accepted. Anything else the agent types is not trusted.
+   */
+  isTrustedValue(value: string): boolean {
+    return this.plan?.trustedValues.includes(value) === true;
   }
 
   /** Record that a step was taken. */

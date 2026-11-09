@@ -357,6 +357,7 @@ describe('the CLI command modules', () => {
           allowedOrigins: [],
           allowedActionClasses: [],
           maxSteps: 5,
+          trustedValues: [],
           createdAt: 'now',
           successCondition: { type: 'url_matches', pattern: '/x' },
         },

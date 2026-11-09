@@ -56,6 +56,19 @@ The refs (`e12`) are stable within a snapshot. Use them in `bv act`.
 bv act <kind> <target> [value] [--dry-run] [--approve token]
 ```
 
+A value typed on the command line is **not trusted** unless a human put
+it in the plan's `trustedValues`. A value that came from the page is
+always untrusted:
+
+```bash
+bv act fill '#email' --from-ref e12        # the value is the text of e12
+bv act fill '#email' --from-extract email   # the value is the extracted field
+```
+
+Both read the value out of the page and mark it tainted, so the sink
+rules apply. A tainted value cannot reach a password, card, OTP or
+email-recipient field, and cannot be sent, without an approval.
+
 Kinds: `click`, `dblclick`, `hover`, `type`, `fill`, `select`, `check`,
 `uncheck`, `press`, `scroll`, `upload`, `focus`.
 

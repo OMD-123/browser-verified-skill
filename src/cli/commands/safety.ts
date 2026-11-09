@@ -96,6 +96,12 @@ export function registerSafety(program: Command): void {
           `classes: ${payload.plan.allowedActionClasses.join(', ') || '(none)'}`,
           `max steps: ${payload.plan.maxSteps}`,
           `success: ${JSON.stringify(payload.plan.successCondition)}`,
+          // The trusted values are shown, because a value here is one
+          // the human confirmed and it will reach a field without an
+          // approval.
+          `trusted values: ${
+            payload.plan.trustedValues.length > 0 ? payload.plan.trustedValues.join(', ') : '(none)'
+          }`,
         ];
         emit(cmd, ok(payload, lines));
       } catch (err) {

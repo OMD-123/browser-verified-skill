@@ -206,7 +206,20 @@ export function evaluate(intent: ActionIntent, ctx: PolicyContext): PolicyDecisi
     return { verdict: 'deny', reasons, ruleIds, actionClass };
   }
 
-  // --- 5. Approval-required classes ----------------------------------------
+  // --- 5. Tainted input ----------------------------------------------------
+  // This comes BEFORE the approval-required check. A tainted value in a
+  // submit is a different problem from a submit that needs approval:
+  // the first says "this content came from the page", the second says
+  // "submits need a human". Reporting only the second hides the first.
+  //
+  // Both end in `needs_approval`, so the action is refused either way.
+  if (ctx.tainted === true && (actionClass === 'submit' || actionClass === 'messaging')) {
+    reasons.push('the action would send content derived from the page');
+    ruleIds.push('policy.tainted.submit');
+    return { verdict: 'needs_approval', reasons, ruleIds, actionClass };
+  }
+
+  // --- 6. Approval-required classes ----------------------------------------
   if (requiresApproval(actionClass, policy)) {
     if (ctx.approved === true) {
       reasons.push(`the "${actionClass}" action class was approved`);
@@ -230,15 +243,6 @@ export function evaluate(intent: ActionIntent, ctx: PolicyContext): PolicyDecisi
     }
     reasons.push(`the "${actionClass}" action class requires approval`);
     ruleIds.push(`policy.approval.required.${actionClass}`);
-    return { verdict: 'needs_approval', reasons, ruleIds, actionClass };
-  }
-
-  // --- 6. Tainted input ----------------------------------------------------
-  // Tainted input is handled in detail by the taint module, which refuses
-  // specific sinks. The policy only refuses the general case.
-  if (ctx.tainted === true && (actionClass === 'submit' || actionClass === 'messaging')) {
-    reasons.push('the action would send content derived from the page');
-    ruleIds.push('policy.tainted.submit');
     return { verdict: 'needs_approval', reasons, ruleIds, actionClass };
   }
 

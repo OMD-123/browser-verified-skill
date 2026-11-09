@@ -1148,6 +1148,11 @@ function evaluate(intent, ctx) {
     ruleIds.push("policy.eval_readonly.disabled");
     return { verdict: "deny", reasons, ruleIds, actionClass };
   }
+  if (ctx.tainted === true && (actionClass === "submit" || actionClass === "messaging")) {
+    reasons.push("the action would send content derived from the page");
+    ruleIds.push("policy.tainted.submit");
+    return { verdict: "needs_approval", reasons, ruleIds, actionClass };
+  }
   if (requiresApproval(actionClass, policy)) {
     if (ctx.approved === true) {
       reasons.push(`the "${actionClass}" action class was approved`);
@@ -1163,11 +1168,6 @@ function evaluate(intent, ctx) {
     }
     reasons.push(`the "${actionClass}" action class requires approval`);
     ruleIds.push(`policy.approval.required.${actionClass}`);
-    return { verdict: "needs_approval", reasons, ruleIds, actionClass };
-  }
-  if (ctx.tainted === true && (actionClass === "submit" || actionClass === "messaging")) {
-    reasons.push("the action would send content derived from the page");
-    ruleIds.push("policy.tainted.submit");
     return { verdict: "needs_approval", reasons, ruleIds, actionClass };
   }
   reasons.push(`the "${actionClass}" action class is allowed by policy`);
@@ -1219,6 +1219,16 @@ var init_planlock = __esm({
       allowedOrigins: z2.array(z2.string().min(1)).default([]),
       allowedActionClasses: z2.array(z2.enum(ACTION_CLASSES)).default([]),
       maxSteps: z2.number().int().positive().default(80),
+      /**
+       * Literal values a human confirmed in the plan.
+       *
+       * A value typed by the agent is not trusted. A value the human put
+       * in the plan, and then approved, is: the human read it and said so.
+       *
+       * This is the only way a literal string reaches a sink without an
+       * approval.
+       */
+      trustedValues: z2.array(z2.string().min(1)).default([]),
       createdAt: z2.string().min(1)
     }).strict();
     PlanLock = class {
@@ -1324,6 +1334,16 @@ var init_planlock = __esm({
           }
         }
         return { allowed: true };
+      }
+      /**
+       * Whether a literal value was confirmed by a human in the plan.
+       *
+       * The plan is set by the operator and shown to them before it is
+       * locked. A value in `trustedValues` is one the human read and
+       * accepted. Anything else the agent types is not trusted.
+       */
+      isTrustedValue(value) {
+        return this.plan?.trustedValues.includes(value) === true;
       }
       /** Record that a step was taken. */
       recordStep() {
@@ -5594,6 +5614,51 @@ __export(daemon_process_exports, {
   runDaemonProcess: () => runDaemonProcess
 });
 import { readFile as readFile11 } from "fs/promises";
+function readExtractedValues() {
+  if (extractedValues.size === 0) return void 0;
+  return Object.fromEntries(extractedValues);
+}
+async function resolvePageValue(page, fromRef, fromExtract) {
+  if (fromRef !== void 0 && fromExtract !== void 0) {
+    return { ok: false, error: "use either --from-ref or --from-extract, not both" };
+  }
+  if (fromRef !== void 0) {
+    let locator;
+    try {
+      locator = page.getByRef(fromRef);
+    } catch {
+      return { ok: false, error: `"${fromRef}" is not a valid ref` };
+    }
+    const count = await locator.count().catch(() => 0);
+    if (count === 0) {
+      return {
+        ok: false,
+        error: `no element with ref ${fromRef}. Take a snapshot again: refs change when the page changes.`
+      };
+    }
+    const text = await locator.first().evaluate((element) => {
+      const value = element.innerText;
+      return typeof value === "string" ? value.trim() : "";
+    }).catch(() => "");
+    return { ok: true, value: text, via: `ref ${fromRef}`, ref: fromRef };
+  }
+  const stored = readExtractedValues();
+  if (stored === void 0) {
+    return {
+      ok: false,
+      error: "there is no extracted value to use. Run `bv extract` first, then use --from-extract <field>."
+    };
+  }
+  const entry = stored[fromExtract ?? ""];
+  if (entry === void 0) {
+    const names = Object.keys(stored).join(", ");
+    return {
+      ok: false,
+      error: `there is no extracted field called "${fromExtract ?? ""}". ` + (names !== "" ? `The fields are: ${names}.` : "The extract produced no fields.")
+    };
+  }
+  return { ok: true, value: entry.value, via: `extract ${fromExtract ?? ""}` };
+}
 function describeType(condition) {
   if ("all" in condition) return "all";
   if ("any" in condition) return "any";
@@ -5998,6 +6063,11 @@ function createHandlers(context) {
       const schema = params["schema"];
       const page = await s.page();
       const result = await extract(page, schema);
+      extractedValues.clear();
+      for (const [name, entry] of Object.entries(result.fields)) {
+        if (typeof entry.value !== "string") continue;
+        extractedValues.set(name, { value: entry.value, url: result.url });
+      }
       return {
         data: {
           fields: result.fields,
@@ -6046,10 +6116,39 @@ function createHandlers(context) {
       const targetInput = params["target"];
       const target = typeof targetInput === "object" && targetInput !== null ? targetInput : parseTarget(typeof targetInput === "string" ? targetInput : "");
       const value = typeof params["value"] === "string" ? params["value"] : void 0;
+      const fromRef = typeof params["fromRef"] === "string" ? params["fromRef"] : void 0;
+      const fromExtract = typeof params["fromExtract"] === "string" ? params["fromExtract"] : void 0;
       const page = await s.page();
       const facts = await inspectTarget(page, target);
       const currentUrl = page.url();
-      const tainted = value !== void 0 && isTainted(value);
+      let effectiveValue = value;
+      if (fromRef !== void 0 || fromExtract !== void 0) {
+        const resolved = await resolvePageValue(page, fromRef, fromExtract);
+        if (!resolved.ok) {
+          return { data: { error: resolved.error }, exitCode: EXIT.USAGE };
+        }
+        effectiveValue = taint(resolved.value, {
+          source: "page-text",
+          url: page.url(),
+          origin: originOf(page.url()),
+          via: resolved.via
+        });
+      }
+      let trusted = effectiveValue !== void 0 && !isTainted(effectiveValue);
+      if (trusted && effectiveValue !== void 0) {
+        if (fromRef !== void 0 || fromExtract !== void 0) {
+          trusted = false;
+        } else if (!planLock.isTrustedValue(effectiveValue)) {
+          effectiveValue = taint(effectiveValue, {
+            source: "model-output",
+            url: currentUrl,
+            origin: originOf(currentUrl),
+            via: "the agent typed it"
+          });
+          trusted = false;
+        }
+      }
+      const tainted = effectiveValue !== void 0 && !trusted;
       const sink = sinkForField({
         ...facts.role !== void 0 ? { role: facts.role } : {},
         ...facts.name !== void 0 ? { name: facts.name } : {},
@@ -6060,7 +6159,7 @@ function createHandlers(context) {
         {
           intent: {
             kind,
-            ...value !== void 0 ? { value } : {},
+            ...effectiveValue !== void 0 ? { value: effectiveValue } : {},
             ...facts.role !== void 0 ? { role: facts.role } : {},
             ...facts.name !== void 0 ? { name: facts.name } : {},
             ...facts.text !== void 0 ? { text: facts.text } : {},
@@ -6134,7 +6233,7 @@ function createHandlers(context) {
       const outcome = await s.act({
         kind,
         target,
-        ...value !== void 0 ? { value } : {},
+        ...effectiveValue !== void 0 ? { value: effectiveValue } : {},
         ...params["force"] === true ? { force: true } : {}
       });
       if (outcome.ok) {
@@ -6144,7 +6243,7 @@ function createHandlers(context) {
           kind,
           locators: candidatesFor(target),
           ...outcome.strategy !== void 0 ? { winningStrategy: outcome.strategy } : {},
-          ...value !== void 0 ? { value } : {},
+          ...effectiveValue !== void 0 ? { value: effectiveValue } : {},
           pre: { url: outcome.urlBefore },
           post: {
             url: outcome.urlAfter,
@@ -6331,7 +6430,7 @@ async function runDaemonProcess(options) {
     daemon.server.once("close", () => resolve5());
   });
 }
-var APPROVER_METHODS, ACTION_CLASS_SET, ACTION_KINDS2;
+var extractedValues, APPROVER_METHODS, ACTION_CLASS_SET, ACTION_KINDS2;
 var init_daemon_process = __esm({
   "src/core/daemon-process.ts"() {
     "use strict";
@@ -6346,6 +6445,8 @@ var init_daemon_process = __esm({
     init_policy();
     init_planlock();
     init_approvals();
+    init_taint();
+    init_evaluator();
     init_approver();
     init_terminal();
     init_gate();
@@ -6360,6 +6461,7 @@ var init_daemon_process = __esm({
     init_recorder();
     init_store();
     init_snapshots();
+    extractedValues = /* @__PURE__ */ new Map();
     APPROVER_METHODS = /* @__PURE__ */ new Set(["approve.issue"]);
     ACTION_CLASS_SET = new Set(ACTION_CLASSES);
     ACTION_KINDS2 = [
@@ -6933,7 +7035,13 @@ function registerPerception(program) {
       }
     }
   );
-  program.command("act").description("perform an action on the page").argument("<kind>", `one of: ${ACTION_KINDS.join(", ")}`).argument("<target>", 'a ref (e12), or a descriptor (role=button name="Sign in")').argument("[value]", "the value to type, fill, select, press or upload").option("--dry-run", "report what would happen without doing it", false).option("--force", "skip actionability checks", false).option("--approve <token>", "an approval token for this exact action").action(
+  program.command("act").description("perform an action on the page").argument("<kind>", `one of: ${ACTION_KINDS.join(", ")}`).argument("<target>", 'a ref (e12), or a descriptor (role=button name="Sign in")').argument("[value]", "the value to type, fill, select, press or upload").option("--dry-run", "report what would happen without doing it", false).option("--force", "skip actionability checks", false).option("--approve <token>", "an approval token for this exact action").option(
+    "--from-ref <ref>",
+    "the value comes from this snapshot ref (e12). The value is page-derived, so it is treated as untrusted."
+  ).option(
+    "--from-extract <field>",
+    "the value comes from this extracted field. The value is page-derived, so it is treated as untrusted."
+  ).action(
     async (kind, target, value, options, cmd) => {
       const global = globalOptions(cmd);
       if (!ACTION_KINDS.includes(kind)) {
@@ -6968,7 +7076,12 @@ function registerPerception(program) {
           target: descriptor,
           ...value !== void 0 ? { value } : {},
           force: options.force === true,
-          ...typeof options.approve === "string" ? { approvalToken: options.approve } : {}
+          ...typeof options.approve === "string" ? { approvalToken: options.approve } : {},
+          // The daemon resolves the page-derived value and taints it.
+          // The CLI never sends the value itself, so the agent cannot
+          // pass a trusted string by calling the daemon directly.
+          ...typeof options.fromRef === "string" ? { fromRef: options.fromRef } : {},
+          ...typeof options.fromExtract === "string" ? { fromExtract: options.fromExtract } : {}
         });
         if (payload.denied === true) {
           const lines2 = [
@@ -7257,7 +7370,11 @@ function registerSafety(program) {
         `origins: ${payload.plan.allowedOrigins.join(", ") || "(any)"}`,
         `classes: ${payload.plan.allowedActionClasses.join(", ") || "(none)"}`,
         `max steps: ${payload.plan.maxSteps}`,
-        `success: ${JSON.stringify(payload.plan.successCondition)}`
+        `success: ${JSON.stringify(payload.plan.successCondition)}`,
+        // The trusted values are shown, because a value here is one
+        // the human confirmed and it will reach a field without an
+        // approval.
+        `trusted values: ${payload.plan.trustedValues.length > 0 ? payload.plan.trustedValues.join(", ") : "(none)"}`
       ];
       emit(cmd, ok(payload, lines));
     } catch (err) {
