@@ -1090,6 +1090,13 @@ function matchDomains(host, patterns) {
   }
   return { matched: false };
 }
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
 function normalizeOrigin(value) {
   let raw = value.trim();
   if (raw.toLowerCase().startsWith(URL_MARKER)) {
@@ -1177,13 +1184,6 @@ var init_evaluator = __esm({
 
 // src/safety/planlock.ts
 import { z as z2 } from "zod";
-function originOf(url) {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url;
-  }
-}
 var ConditionSchema, PlanSchema, PlanLock;
 var init_planlock = __esm({
   "src/safety/planlock.ts"() {
@@ -4597,7 +4597,9 @@ function hashAction(action) {
     kind: action.kind,
     target: action.target,
     value: action.value ?? null,
-    url: action.url ?? null
+    url: action.url ?? null,
+    origin: action.origin ?? null,
+    runId: action.runId ?? null
   });
   return createHmac("sha256", "bv-action").update(payload).digest("hex").slice(0, 32);
 }
@@ -4854,12 +4856,15 @@ var init_terminal = __esm({
 });
 
 // src/safety/gate.ts
-function actionHashFor(intent) {
+function actionHashFor(intent, context) {
   const target = intent.name ?? intent.text ?? intent.ref ?? intent.css ?? "";
   return hashAction({
     kind: intent.kind,
     target,
-    ...intent.value !== void 0 ? { value: intent.value } : {}
+    ...intent.value !== void 0 ? { value: intent.value } : {},
+    ...context?.url !== void 0 ? { url: context.url } : {},
+    ...context?.origin !== void 0 ? { origin: context.origin } : {},
+    ...context?.runId !== void 0 ? { runId: context.runId } : {}
   });
 }
 function evaluateAction(input, gate) {
@@ -4936,11 +4941,15 @@ function evaluateAction(input, gate) {
       reasons.push(`the ${actionClass} action class requires an explicit approval`);
       ruleIds.push("policy.approval_required");
     }
+    const hash2 = actionHashFor(input.intent, {
+      url: input.currentUrl,
+      origin: originOf(input.currentUrl),
+      ...input.runId !== void 0 ? { runId: input.runId } : {}
+    });
     if (input.approvalToken !== void 0) {
-      const hash3 = actionHashFor(input.intent);
       const consumed = gate.approvals.consume(input.approvalToken, {
-        actionId: hash3,
-        actionHash: hash3
+        actionId: hash2,
+        actionHash: hash2
       });
       if (consumed.ok) {
         return {
@@ -4954,7 +4963,6 @@ function evaluateAction(input, gate) {
       reasons.push(consumed.reason);
       ruleIds.push(consumed.ruleId);
     }
-    const hash2 = actionHashFor(input.intent);
     const request = gate.approvals.request({
       actionId: hash2,
       actionHash: hash2,
@@ -4993,6 +5001,7 @@ var init_gate = __esm({
     "use strict";
     init_evaluator();
     init_classify();
+    init_evaluator();
     init_taint();
     init_approvals();
     init_detectors();
@@ -6065,6 +6074,9 @@ function createHandlers(context) {
             ...kind === "goto" ? { url: target.css ?? "" } : {}
           },
           currentUrl,
+          // The run id is part of the action hash, so an approval cannot
+          // cross runs.
+          runId,
           tainted,
           ...sink !== void 0 ? { sink } : {},
           ...target.ref !== void 0 ? { targetRef: target.ref } : {},

@@ -229,7 +229,7 @@ describe('the published artifact', () => {
       .map((line) => line.trim().split(/\s+/)[0])
       .filter((name) => name !== 'help');
 
-    expect(commands.length).toBe(26);
+    expect(commands.length).toBe(27);
 
     const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
     expect(readme).toContain(`${commands.length} commands`);

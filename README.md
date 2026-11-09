@@ -215,7 +215,7 @@ the tool goes through it.** The CLI, the MCP server and the agent loop all call 
 
 ## The command surface
 
-26 commands. Every one supports `--help`, `--json` and a meaningful exit code.
+27 commands. Every one supports `--help`, `--json` and a meaningful exit code.
 
 | Exit code | Meaning             |
 | --------- | ------------------- |
@@ -235,10 +235,11 @@ bv plan set|show|amend              bv discover-api <runId> [--openapi]
 bv snapshot [--full] [--max-tokens N] bv vault set|list|rm
 bv act <kind> <target> [value]       bv memory ls|rm|prune
 bv approve <actionId>                bv redteam run
+bv approvals                          bv dryrun-report [--run <runId>]
 bv verify --condition cond.json      bv report <runId> [--format md|json]
 bv extract --schema schema.json      bv audit [runId]
 bv rewind --to N                     bv mcp
-bv compile <runId> --out f.spec.ts   bv dryrun-report [--run <runId>]
+bv compile <runId> --out f.spec.ts
 bv replay <runId> [--var k=v] [--heal]
 bv drift <runId>
 ```

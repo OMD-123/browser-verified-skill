@@ -463,6 +463,64 @@ describe('the approval prompt', () => {
   });
 });
 
+describe('the action hash', () => {
+  // The hash is what binds an approval to an action. In v1 it covered
+  // the kind, the target and the value, but NOT the page the action was
+  // on. So a token approved for 'click Submit' on one page could be
+  // spent on a different page.
+  it('binds a token to the page origin', () => {
+    const onExample = hashAction({
+      kind: 'click',
+      target: '#submit',
+      origin: 'https://example.test',
+    });
+    const onOther = hashAction({
+      kind: 'click',
+      target: '#submit',
+      origin: 'https://evil.test',
+    });
+
+    expect(onExample).not.toBe(onOther);
+  });
+
+  it('binds a token to the resolved url', () => {
+    const atOne = hashAction({
+      kind: 'click',
+      target: '#submit',
+      url: 'https://example.test/a',
+    });
+    const atAnother = hashAction({
+      kind: 'click',
+      target: '#submit',
+      url: 'https://example.test/b',
+    });
+
+    expect(atOne).not.toBe(atAnother);
+  });
+
+  it('binds a token to the run id', () => {
+    const inOne = hashAction({ kind: 'click', target: '#submit', runId: 'run-1' });
+    const inAnother = hashAction({ kind: 'click', target: '#submit', runId: 'run-2' });
+
+    expect(inOne).not.toBe(inAnother);
+  });
+
+  it('does not change the hash when the context is absent', () => {
+    // The hash must still work for the actions that have no context.
+    expect(hashAction({ kind: 'click', target: '#submit' })).toBe(
+      hashAction({ kind: 'click', target: '#submit' }),
+    );
+  });
+
+  it('treats a missing context the same as an absent one', () => {
+    const withUndefined: Parameters<typeof hashAction>[0] = {
+      kind: 'click',
+      target: '#submit',
+    };
+    expect(hashAction(withUndefined)).toBe(hashAction({ kind: 'click', target: '#submit' }));
+  });
+});
+
 describe('the approval store', () => {
   it('refuses to issue a token for an action that was never requested', () => {
     const store = new ApprovalStore();

@@ -22,6 +22,7 @@ import type { ActionClass } from './policy.js';
 import { evaluate } from './evaluator.js';
 import type { PolicyDecision } from './policy.js';
 import { classifyAction, type ActionIntent } from './classify.js';
+import { originOf } from './evaluator.js';
 import type { PlanDecision, PlanLock } from './planlock.js';
 import { checkSink, type TaintSink } from './taint.js';
 import { hashAction, type ApprovalRequest, type ApprovalStore } from './approvals.js';
@@ -51,6 +52,12 @@ export interface GateInput {
   intent: ActionIntent;
   /** The current page URL. */
   currentUrl: string;
+  /**
+   * The run this action belongs to.
+   *
+   * Part of the action hash, so an approval cannot cross runs.
+   */
+  runId?: string;
   /** Whether the value being used is tainted. */
   tainted?: boolean;
   /** The taint sink, when a value is being used. */
@@ -75,13 +82,24 @@ export interface GatePolicy {
   approvals: ApprovalStore;
 }
 
-/** The hash of an action, used to bind an approval to it. */
-export function actionHashFor(intent: ActionIntent): string {
+/**
+ * The hash of an action, used to bind an approval to it.
+ *
+ * The context is part of the hash: an approval for one page must not be
+ * spendable on another, and it must not cross runs.
+ */
+export function actionHashFor(
+  intent: ActionIntent,
+  context?: { url?: string; origin?: string; runId?: string },
+): string {
   const target = intent.name ?? intent.text ?? intent.ref ?? intent.css ?? '';
   return hashAction({
     kind: intent.kind,
     target,
     ...(intent.value !== undefined ? { value: intent.value } : {}),
+    ...(context?.url !== undefined ? { url: context.url } : {}),
+    ...(context?.origin !== undefined ? { origin: context.origin } : {}),
+    ...(context?.runId !== undefined ? { runId: context.runId } : {}),
   });
 }
 
@@ -201,9 +219,18 @@ export function evaluateAction(input: GateInput, gate: GatePolicy): GateVerdict 
       ruleIds.push('policy.approval_required');
     }
 
-    // A supplied token is consumed only if it matches this exact action.
+    // The hash binds the action to its context: the page origin, the
+    // resolved URL and the run. A token approved for one page cannot be
+    // spent on another, and cannot cross runs.
+    const hash = actionHashFor(input.intent, {
+      url: input.currentUrl,
+      origin: originOf(input.currentUrl),
+      ...(input.runId !== undefined ? { runId: input.runId } : {}),
+    });
+
+    // A supplied token is consumed only if it matches this exact action
+    // in this exact context.
     if (input.approvalToken !== undefined) {
-      const hash = actionHashFor(input.intent);
       const consumed = gate.approvals.consume(input.approvalToken, {
         actionId: hash,
         actionHash: hash,
@@ -221,7 +248,6 @@ export function evaluateAction(input: GateInput, gate: GatePolicy): GateVerdict 
       ruleIds.push(consumed.ruleId);
     }
 
-    const hash = actionHashFor(input.intent);
     const request = gate.approvals.request({
       actionId: hash,
       actionHash: hash,

@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { ACTION_CLASSES, type ActionClass } from './policy.js';
-import { normalizeOrigin } from './evaluator.js';
+import { normalizeOrigin, originOf } from './evaluator.js';
 
 /**
  * The success-condition DSL.
@@ -253,14 +253,5 @@ export class PlanLock {
   /** Record that a step was taken. */
   recordStep(): void {
     this.stepsUsed += 1;
-  }
-}
-
-/** Extract the origin of a URL. */
-function originOf(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url;
   }
 }

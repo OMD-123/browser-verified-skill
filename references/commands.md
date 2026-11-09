@@ -85,8 +85,16 @@ thing the plan exists to prevent.
 ## Approvals
 
 ```bash
-bv approve <actionId>
+bv approvals                        # what is waiting for a human
+bv approve <actionId>               # approve with the operator credential
+bv approve <actionId> --code CODE   # approve with the one-time code
 ```
+
+`bv approve` needs the **approver** credential, which lives in
+`.bv/approver.token`. The agent's process never reads that file, so an
+agent cannot approve its own action. The `--code` form needs no
+credential: the short code, shown on the terminal that started the
+daemon, is the human's proof.
 
 ## The dry run
 

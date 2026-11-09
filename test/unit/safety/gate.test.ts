@@ -204,6 +204,83 @@ describe('the safety gate: the approval gate', () => {
     expect(second.allowed).toBe(true);
   });
 
+  it('does not let an approval unlock the same action on another page', () => {
+    // The gap: in v1 the hash covered the kind, target and value, but
+    // not the page. A token approved for "click Delete account" on one
+    // page could be spent on another.
+    //
+    // The policy allows example.test, so the second page is a different
+    // PATH on the same origin. That isolates the URL binding: if only the
+    // origin were hashed, this token would still work.
+    const gate = gateInputs();
+    gate.planLock.set(
+      createPlan({
+        goal: 'x',
+        successCondition: { type: 'text_visible', text: 'y' },
+        allowedOrigins: ['http://example.test'],
+        allowedActionClasses: ['read', 'navigate', 'destructive'],
+      }),
+    );
+    const intent = { kind: 'click', role: 'button', name: 'Delete account' };
+
+    const first = evaluateAction(
+      { intent, currentUrl: 'http://example.test/checkout', interactive: true },
+      gate,
+    );
+    expect(first.approval).toBeDefined();
+
+    const token = gate.approvals.issue(first.approval?.actionId ?? '');
+    expect(token).toBeDefined();
+
+    // The SAME action, on a DIFFERENT page.
+    const second = evaluateAction(
+      {
+        intent,
+        currentUrl: 'http://example.test/settings',
+        interactive: true,
+        ...(token !== undefined ? { approvalToken: token.token } : {}),
+      },
+      gate,
+    );
+    expect(second.allowed).toBe(false);
+    expect(second.next).toBe('needs_approval');
+  });
+
+  it('does not let an approval cross runs', () => {
+    const gate = gateInputs();
+    gate.planLock.set(
+      createPlan({
+        goal: 'x',
+        successCondition: { type: 'text_visible', text: 'y' },
+        allowedOrigins: ['http://example.test'],
+        allowedActionClasses: ['read', 'navigate', 'destructive'],
+      }),
+    );
+    const intent = { kind: 'click', role: 'button', name: 'Delete account' };
+
+    const first = evaluateAction(
+      { intent, currentUrl: 'http://example.test/', runId: 'run-1', interactive: true },
+      gate,
+    );
+    expect(first.approval).toBeDefined();
+
+    const token = gate.approvals.issue(first.approval?.actionId ?? '');
+    expect(token).toBeDefined();
+
+    // The SAME action, in a DIFFERENT run.
+    const second = evaluateAction(
+      {
+        intent,
+        currentUrl: 'http://example.test/',
+        runId: 'run-2',
+        interactive: true,
+        ...(token !== undefined ? { approvalToken: token.token } : {}),
+      },
+      gate,
+    );
+    expect(second.allowed).toBe(false);
+  });
+
   it('does not let an approval unlock a different action', () => {
     const gate = gateInputs();
     gate.planLock.set(

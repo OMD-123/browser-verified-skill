@@ -108,6 +108,21 @@ export function matchDomains(host: string | undefined, patterns: readonly string
  * `@url:` markers are stripped and the path is removed, so
  * `@url:`http://localhost:3000/app`` and `http://localhost:3000` are equal.
  */
+/**
+ * The origin of a URL.
+ *
+ * A URL that does not parse has no origin, so the URL itself is used.
+ * That is the safe answer: an unparseable URL is not an origin the
+ * policy has allowed.
+ */
+export function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
 export function normalizeOrigin(value: string): string {
   let raw = value.trim();
   if (raw.toLowerCase().startsWith(URL_MARKER)) {

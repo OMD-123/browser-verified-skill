@@ -763,6 +763,9 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
             ...(kind === 'goto' ? { url: target.css ?? '' } : {}),
           },
           currentUrl,
+          // The run id is part of the action hash, so an approval cannot
+          // cross runs.
+          runId,
           tainted,
           ...(sink !== undefined ? { sink } : {}),
           ...(target.ref !== undefined ? { targetRef: target.ref } : {}),
