@@ -7,7 +7,8 @@
  */
 import { readDaemonInfo, readDaemonToken, daemonBaseUrl, isProcessAlive } from './daemon-info.js';
 import { APPROVER_TOKEN_HEADER } from '../safety/approver.js';
-import { SessionError } from './errors.js';
+import { SessionError, InjectionBlockedError } from './errors.js';
+import { EXIT } from './exit.js';
 import type { DaemonRequest, DaemonResponse } from './daemon.js';
 
 /** A connection to a running daemon. */
@@ -134,6 +135,20 @@ export function createClient(
       const err = new Error(body.error ?? 'the session daemon reported an unknown error');
       Object.assign(err, { reasons: body.reasons ?? [], exitCode: body.exitCode });
       throw err;
+    }
+
+    // An injection block gets its own error class, so a caller can tell
+    // "the page tried to take over the agent" apart from "the policy
+    // said no" without parsing the message.
+    //
+    // The daemon reports the refusal in the DATA, with the exit code
+    // beside it, so the check is on both.
+    if (body.exitCode === EXIT.INJECTION_BLOCK) {
+      const data = body.data as { reasons?: string[] } | undefined;
+      throw new InjectionBlockedError(
+        'a prompt-injection payload was found and the action was refused',
+        data?.reasons ?? body.reasons ?? [],
+      );
     }
 
     return body.data as T;

@@ -829,6 +829,48 @@ export function nodesNeedingApproval(findings: readonly Finding[]): string[] {
   return [...refs];
 }
 
+/**
+ * The nodes with a `block` finding.
+ *
+ * A block finding is not a "needs a human" finding. It is the guard
+ * saying that the node is an attack, and acting on it is the thing the
+ * attack wants. So it is a hard refusal, and it cannot be approved
+ * away: approving it IS the attack succeeding.
+ */
+export function nodesBlocking(findings: readonly Finding[]): string[] {
+  const refs = new Set<string>();
+  for (const finding of findings) {
+    if (finding.severity !== 'block') continue;
+    if (finding.nodeRef !== undefined) refs.add(finding.nodeRef);
+  }
+  return [...refs];
+}
+
+/**
+ * The block findings that sit on text which would reach a sink.
+ *
+ * A page can carry a payload that is never acted on directly but is fed
+ * into a field by a later step. The payload is still a payload, so text
+ * headed for a sink is checked for block findings too.
+ */
+export function blockingFindingsForValue(findings: readonly Finding[], value: string): Finding[] {
+  if (value.length === 0) return [];
+  const needle = value.trim().slice(0, 80);
+  if (needle.length === 0) return [];
+
+  return findings.filter((finding) => {
+    if (finding.severity !== 'block') return false;
+
+    const snippet = finding.evidenceSnippet.trim();
+    if (snippet.length === 0) return false;
+
+    // The finding's evidence may be the value itself, or a window of
+    // context around it. Either way, the value has to be inside it.
+    const short = snippet.slice(0, 80);
+    return needle.includes(short) || snippet.includes(needle);
+  });
+}
+
 /** A summary of the findings, for the snapshot header. */
 export function summarizeFindings(findings: readonly Finding[]): string {
   if (findings.length === 0) return '';

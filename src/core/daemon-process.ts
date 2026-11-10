@@ -134,7 +134,7 @@ async function resolvePageValue(
  */
 const APPROVER_METHODS: ReadonlySet<string> = new Set(['approve.issue']);
 import { evaluateAction } from '../safety/gate.js';
-import { inspectTarget } from '../safety/inspect.js';
+import { inspectTarget, type ElementFacts } from '../safety/inspect.js';
 import { sinkForField } from '../safety/taint.js';
 import { isTainted } from '../safety/taint.js';
 import {
@@ -207,7 +207,28 @@ async function scanForFindings(
   const result = scanner.scanDom(dom);
   const textResult = scanner.scan([{ text: visible }]);
 
-  return [...result.findings, ...textResult.findings];
+  // The page-wide text findings carry a marker, so the gate can tell
+  // them from the findings on a specific node. Without the marker, a
+  // page-wide finding would be matched against a target's text, and a
+  // payload anywhere on the page would refuse every action.
+  return [
+    ...result.findings,
+    ...textResult.findings.map((finding) => ({ ...finding, nodeRef: finding.nodeRef ?? 'page' })),
+  ];
+}
+
+/**
+ * Scan the target node on its own.
+ *
+ * The page-wide scan gives context but a wider evidence window. The
+ * node the action touches is what matters, so it is scanned directly.
+ */
+function scanTargetNode(facts: ElementFacts, scanner: InjectionScanner): Finding[] {
+  const text = facts.text ?? facts.name;
+  if (text === undefined || text.trim().length === 0) return [];
+
+  const result = scanner.scan([{ text }]);
+  return result.findings.filter((finding) => finding.severity === 'block');
 }
 
 /**
@@ -914,6 +935,22 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
       // The injection findings for the node the action targets.
       const findings: Finding[] = await scanForFindings(s, scanner);
 
+      // The target node is scanned on its own as well. The page-wide
+      // scan gives context, but the node the action touches is what
+      // matters: a payload sitting on the node the agent is about to
+      // click is a block, even when the page-wide evidence window does
+      // not line up with the node's own text.
+      const targetFindings = scanTargetNode(facts, scanner);
+      if (targetFindings.length > 0) {
+        // These findings are the TARGET's own. They carry no node ref,
+        // because a CSS target has none, so the gate matches them
+        // against the target's text. The page-wide findings are left
+        // alone: their evidence is a window that happens to contain
+        // the target's text, and matching against it would refuse
+        // actions because of a payload somewhere else on the page.
+        findings.push(...targetFindings);
+      }
+
       const verdict = evaluateAction(
         {
           intent: {
@@ -948,8 +985,16 @@ export function createHandlers(context: DaemonContext): Record<string, DaemonHan
       );
 
       if (!verdict.allowed) {
-        const exitCode =
-          verdict.next === 'needs_approval' ? EXIT.NEEDS_APPROVAL : EXIT.POLICY_DENIED;
+        // A prompt-injection block is its own exit code. It says
+        // something different from a policy denial: the page tried to
+        // take over the agent, and that is worth a pipeline noticing.
+        const injectionBlocked = verdict.ruleIds.includes('injection.blocked');
+
+        const exitCode = injectionBlocked
+          ? EXIT.INJECTION_BLOCK
+          : verdict.next === 'needs_approval'
+            ? EXIT.NEEDS_APPROVAL
+            : EXIT.POLICY_DENIED;
 
         // A pending approval gets a short code, so a human can approve it
         // from their own terminal without the agent ever holding a

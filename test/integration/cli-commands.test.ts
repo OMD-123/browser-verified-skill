@@ -86,22 +86,22 @@ async function run(cwd: string, args: string[]): Promise<Captured> {
     return true;
   };
 
+  let exitCode: number | undefined;
   try {
     await program.parseAsync(['--cwd', cwd, ...args], { from: 'user' });
   } catch {
     // Commander throws on a usage error; the output is what matters.
   } finally {
+    // The exit code is read BEFORE it is restored. Reading it after the
+    // restore always gave the original, so the exit code was never
+    // actually checked by any test.
+    exitCode = typeof process.exitCode === 'number' ? process.exitCode : undefined;
     process.stdout.write = originalOut;
     process.stderr.write = originalErr;
     process.exitCode = originalExit;
   }
 
-  const exitCode = process.exitCode;
-  return {
-    stdout,
-    stderr,
-    exitCode: typeof exitCode === 'number' ? exitCode : undefined,
-  };
+  return { stdout, stderr, exitCode };
 }
 
 describe('the CLI command modules', () => {
@@ -497,6 +497,30 @@ describe('the CLI command modules', () => {
     expect(result.stdout).toContain('stale');
   });
 
+  it('clears the stale state and says so when the session is dead', async () => {
+    await mkdir(join(dir, '.bv'), { recursive: true });
+    await writeFile(
+      join(dir, '.bv', 'daemon.json'),
+      JSON.stringify({
+        port: 12345,
+        tokenHash: 'abc',
+        // A pid that cannot be alive.
+        pid: 0,
+        session: 'default',
+        headed: false,
+        startedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      'utf8',
+    );
+
+    const result = await run(dir, ['session', 'stop']);
+    expect(result.stdout).toContain('stale state cleared');
+
+    // The stale descriptor is gone.
+    const after = await run(dir, ['session', 'status']);
+    expect(after.stdout).toContain('no session');
+  });
+
   it('clears the state of a stale session when it stops', async () => {
     await mkdir(join(dir, '.bv'), { recursive: true });
     await writeFile(
@@ -562,6 +586,25 @@ describe('the CLI command modules', () => {
   it('does a dry run without touching the daemon', async () => {
     const result = await run(dir, ['act', 'click', 'role=button name="Go"', '--dry-run']);
     expect(result.stdout).toContain('dry run');
+  });
+
+  it('reports a prompt-injection block with exit 5', async () => {
+    // The block is its own exit code: it says the page tried to take
+    // over the agent, which is not the same as "the policy said no" or
+    // "this needs a human".
+    mockedConnect.mockResolvedValue(
+      mockClient({
+        denied: true,
+        next: 'deny',
+        actionClass: 'submit',
+        reasons: ['the target carries a prompt-injection finding'],
+        ruleIds: ['injection.blocked'],
+      }),
+    );
+
+    const result = await run(dir, ['act', 'click', '#a']);
+    expect(result.stdout).toContain('prompt-injection');
+    expect(result.exitCode).toBe(5);
   });
 
   it('reports a refusal with its rule ids', async () => {

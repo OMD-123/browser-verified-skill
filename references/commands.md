@@ -5,6 +5,23 @@ meaningful exit code.
 
 ## The exit codes
 
+| Code | Meaning                    |
+| ---- | -------------------------- |
+| 0    | ok                         |
+| 1    | failure                    |
+| 2    | usage error                |
+| 3    | policy denied              |
+| 4    | needs approval             |
+| 5    | **prompt-injection block** |
+| 6    | verification failed        |
+
+Exit 5 is the one to alert on. It means the page carried a
+prompt-injection payload and the action was **refused**. It is not a
+policy denial and it is not a request for approval: an injection block
+**cannot be approved**, because approving it is the attack succeeding.
+A pipeline that sees exit 5 should stop and let a human look at the
+page.
+
 | Code | Meaning                                                 |
 | ---- | ------------------------------------------------------- |
 | 0    | ok                                                      |

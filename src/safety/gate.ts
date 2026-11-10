@@ -26,7 +26,12 @@ import { originOf } from './evaluator.js';
 import type { PlanDecision, PlanLock } from './planlock.js';
 import { checkSink, type TaintSink } from './taint.js';
 import { hashAction, type ApprovalRequest, type ApprovalStore } from './approvals.js';
-import { nodesNeedingApproval, type Finding } from './injection/detectors.js';
+import {
+  nodesBlocking,
+  nodesNeedingApproval,
+  blockingFindingsForValue,
+  type Finding,
+} from './injection/detectors.js';
 
 /** The verdict of the safety gate. */
 export interface GateVerdict {
@@ -161,6 +166,90 @@ export function evaluateAction(input: GateInput, gate: GatePolicy): GateVerdict 
   ruleIds.push(...decision.ruleIds);
 
   // --- 3. The injection guard ----------------------------------------------
+  //
+  // Two severities, two different answers:
+  //
+  //   - `block`: the node IS an attack. Acting on it is what the attack
+  //     wants, so it is a hard refusal. It cannot be approved away:
+  //     approving it is the attack succeeding.
+  //
+  //   - `review`: the node looks suspicious. A human should look before
+  //     it is acted on, so it needs an approval.
+  //
+  // A block finding on the TARGET is a refusal. A block finding on the
+  // VALUE is also a refusal: the page carried a payload, and the value
+  // about to reach a sink is that payload.
+  const blockingRefs = nodesBlocking(input.findings ?? []);
+  if (input.targetRef !== undefined && blockingRefs.includes(input.targetRef)) {
+    reasons.push(
+      `the target node ${input.targetRef} has a prompt-injection finding that blocks it; this action is refused and cannot be approved`,
+    );
+    ruleIds.push('injection.blocked');
+    return {
+      allowed: false,
+      actionClass,
+      reasons,
+      ruleIds,
+      next: 'deny',
+    };
+  }
+
+  // A target that was named by a DESCRIPTOR rather than a ref has no
+  // ref, so its own text is matched against the findings instead. A
+  // targetless scan would be too blunt: the page might carry a payload
+  // somewhere else entirely, and refusing every action because of it
+  // would train the operator to ignore the refusals.
+  //
+  // Only findings with NO node ref are matched this way. A finding with
+  // a node ref belongs to a specific node, and it is checked against
+  // that node above. Matching a page-wide finding against the target's
+  // text would refuse actions because of a payload that sits somewhere
+  // else on the page.
+  const targetText = input.intent.text ?? input.intent.name ?? '';
+  if (targetText.trim().length > 0) {
+    const ownFindings = (input.findings ?? []).filter((finding) => finding.nodeRef === undefined);
+    const targetFindings = blockingFindingsForValue(ownFindings, targetText);
+    if (targetFindings.length > 0) {
+      reasons.push(
+        `the target carries a prompt-injection finding (${targetFindings
+          .map((finding) => finding.kind)
+          .join(', ')}); this action is refused and cannot be approved`,
+      );
+      ruleIds.push('injection.blocked');
+      return {
+        allowed: false,
+        actionClass,
+        reasons,
+        ruleIds,
+        next: 'deny',
+      };
+    }
+  }
+
+  // Only the findings on a specific node are matched against the
+  // value. A page-wide finding's evidence is a window of the page, and
+  // the value is usually inside it, so matching against it would refuse
+  // every action on a page that carries a payload anywhere.
+  const nodeFindings = (input.findings ?? []).filter(
+    (finding) => finding.nodeRef !== undefined && finding.nodeRef !== 'page',
+  );
+  const valueFindings = blockingFindingsForValue(nodeFindings, input.intent.value ?? '');
+  if (valueFindings.length > 0) {
+    reasons.push(
+      `the value carries a prompt-injection finding (${valueFindings
+        .map((finding) => finding.kind)
+        .join(', ')}); this action is refused and cannot be approved`,
+    );
+    ruleIds.push('injection.blocked');
+    return {
+      allowed: false,
+      actionClass,
+      reasons,
+      ruleIds,
+      next: 'deny',
+    };
+  }
+
   // A node with a "review" finding needs an approval before anything is done
   // to it.
   const suspectRefs = nodesNeedingApproval(input.findings ?? []);

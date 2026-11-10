@@ -29,7 +29,7 @@ export interface StartOptions {
  * so it must be run through `tsx`. In the bundled CLI the daemon is compiled
  * into the bundle, and the bundle is re-spawned with a `--daemon` flag.
  */
-function daemonEntry(): { command: string; args: string[] } {
+export function daemonEntry(): { command: string; args: string[] } {
   const here = dirname(fileURLToPath(import.meta.url));
   const sourceEntry = resolve(here, '..', '..', 'core', 'daemon-entry.ts');
   const tsxCli = resolve(here, '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -71,14 +71,27 @@ function daemonEntry(): { command: string; args: string[] } {
   );
 }
 
-/** Spawn the detached daemon process. */
-export function spawnDaemon(options: {
-  cwd: string;
-  headed: boolean;
-  session: string;
-  contact?: string;
-  runId?: string;
-}): number {
+/**
+ * Spawn the detached daemon process.
+ *
+ * The spawner is a parameter so a test can check what WOULD be spawned
+ * without actually starting a browser. The default is the real spawn.
+ */
+export function spawnDaemon(
+  options: {
+    cwd: string;
+    headed: boolean;
+    session: string;
+    contact?: string;
+    runId?: string;
+  },
+  spawner: (
+    command: string,
+    args: string[],
+    options: { cwd: string; detached: boolean; stdio: 'ignore'; env: NodeJS.ProcessEnv },
+  ) => { pid?: number | undefined; unref: () => void } = (command, args, options) =>
+    spawn(command, args, options),
+): number {
   const entry = daemonEntry();
   const args = [
     ...entry.args,
@@ -92,7 +105,7 @@ export function spawnDaemon(options: {
     ...(options.runId !== undefined ? ['--run-id', options.runId] : []),
   ];
 
-  const child = spawn(entry.command, args, {
+  const child = spawner(entry.command, args, {
     cwd: options.cwd,
     detached: true,
     stdio: 'ignore',
@@ -169,7 +182,6 @@ export function registerSession(program: Command): void {
           `session "${info?.session ?? 'default'}" started (pid ${pid})`,
           `port: ${info?.port ?? '?'}`,
           `headed: ${(options.headed ?? false) ? 'yes' : 'no'}`,
-          info?.headed === false && (options.headed ?? false) ? '' : '',
           `run dir: ${info === undefined ? '?' : '.bv/runs'}`,
         ].filter((line) => line !== '');
 
