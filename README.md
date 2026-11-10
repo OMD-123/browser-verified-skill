@@ -71,9 +71,7 @@ prompt-injection payload — and **does not work around the refusal**.
 </p>
 
 <p align="center">
-  <video src="docs/agent-demo.mp4" poster="docs/agent-demo-poster.jpg" width="820" controls preload="metadata">
-    <a href="docs/agent-demo.mp4">Watch the agent demo (2:14)</a>
-  </video>
+  <img src="docs/agent-demo.mp4" alt="the agent demo" width="820" />
 </p>
 
 **[Watch the agent demo (2:14)](docs/agent-demo.mp4)** — or run it yourself:
