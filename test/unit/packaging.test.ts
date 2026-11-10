@@ -347,6 +347,27 @@ describe('the published artifact', () => {
     expect(demo).toContain('verify');
   });
 
+  it('has an agent demo where the agent refuses to work around a refusal', async () => {
+    // The agent demo's whole claim is that Hermes, given a link, uses the
+    // skill correctly -- including respecting a refusal it cannot get
+    // around. The transcript has to actually show that.
+    const session = await readFile(join(ROOT, 'docs', 'agent-session.md'), 'utf8');
+
+    // It installed the skill from the link.
+    expect(session).toContain('browser-verified-skill');
+
+    // It filled the form.
+    expect(session).toContain('Ada Lovelace');
+    expect(session).toContain('ada@example.test');
+
+    // It met the injection and hit exit 5.
+    expect(session).toContain('fake-system-banner');
+
+    // And it said, in its own words, that it did not work around it.
+    expect(session).toMatch(/did \*\*not\*\* attempt approval/i);
+    expect(session).toMatch(/did not work around it/i);
+  });
+
   it('has an agent-readable demo that teaches the exit codes', async () => {
     // The point of the agent-readable demo is that an agent learns what
     // each exit code means. So the exit codes have to be in it.

@@ -76,7 +76,8 @@
     "README.md",
     "docs/SECURITY.md",
     "docs/KNOWN_LIMITATIONS.md",
-    "docs/DEMO.md"
+    "docs/DEMO.md",
+    "docs/AGENT-DEMO.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -93,6 +94,7 @@
     "build": "tsup",
     "demo": "bash scripts/demo.sh",
     "demo:record": "python3 scripts/render-demo.py",
+    "demo:agent": "bash scripts/demo-agent-live.sh",
     "docs:tree": "tsx scripts/generate-tree.ts",
     "docs:check": "tsx scripts/check-docs.ts",
     "cli": "tsx src/cli/main.ts",

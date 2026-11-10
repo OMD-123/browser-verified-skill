@@ -51,11 +51,22 @@ walls trigger a human handoff, and `robots.txt` is respected.
 
 ## The demo
 
-A real run of `bv` against a local fixture site. Nothing is mocked.
+Two demos, both real runs against a local fixture site. Nothing is mocked.
 
-[![the demo](docs/demo.mp4)](docs/demo.mp4)
+|               | The tool                              | The tool being used by an agent                                  |
+| ------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| Video         | [demo.mp4](docs/demo.mp4) (2:33)      | [agent-demo.mp4](docs/agent-demo.mp4) (2:14)                     |
+| What it shows | `bv` driven by a script that knows it | **Hermes, given only a link**, installing the skill and using it |
+| Run it        | `npm run demo`                        | `bash scripts/demo-agent-live.sh`                                |
 
-**[Watch the demo (2:33)](docs/demo.mp4)** — or run it yourself:
+The agent demo is the one that answers "can I use this?". Hermes is
+handed a repo URL and a task. It installs the skill, reads the docs,
+fills a form, gets a human's approval for the submit, and then meets a
+prompt-injection payload — and **does not work around the refusal**.
+
+[![the agent demo](docs/agent-demo.mp4)](docs/agent-demo.mp4)
+
+**[Watch the agent demo (2:14)](docs/agent-demo.mp4)** — or run it yourself:
 
 ```bash
 bv demo          # the same run, as a document an agent can read
