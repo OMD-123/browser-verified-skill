@@ -115,6 +115,28 @@ describe('the daemon environment', () => {
     expect(with_['ANTHROPIC_BASE_URL']).toBe('https://api.anthropic.test');
   });
 
+  it('forwards the Windows paths on Windows', () => {
+    // The platform is a parameter, so this path is tested on every
+    // platform rather than only on the one the test happens to run on.
+    const env = daemonEnvironment({
+      source: { ...busyEnvironment(), APPDATA: 'C:\\AppData', LOCALAPPDATA: 'C:\\Local' },
+      platformName: 'win32',
+    });
+
+    expect(env['APPDATA']).toBe('C:\\AppData');
+    expect(env['LOCALAPPDATA']).toBe('C:\\Local');
+  });
+
+  it('does not forward the Windows paths on Linux', () => {
+    const env = daemonEnvironment({
+      source: { ...busyEnvironment(), APPDATA: 'C:\\AppData', LOCALAPPDATA: 'C:\\Local' },
+      platformName: 'linux',
+    });
+
+    expect(env['APPDATA']).toBeUndefined();
+    expect(env['LOCALAPPDATA']).toBeUndefined();
+  });
+
   it('forwards nothing that is not on the list', () => {
     const source = busyEnvironment();
     const env = daemonEnvironment({ source });

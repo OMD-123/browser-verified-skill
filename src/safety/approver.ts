@@ -96,9 +96,17 @@ export class ApproverCredential {
    *
    * The file is created with mode 0600 and chmod-ed afterwards, because
    * the file mode on creation is affected by the process umask.
+   *
+   * The chmod is injectable so the failure path can be tested: on
+   * Windows chmod never fails, so that path would otherwise only ever
+   * run on Linux, in CI, where nobody would notice it was uncovered.
    */
-  static async load(cwd: string): Promise<ApproverCredential> {
+  static async load(
+    cwd: string,
+    options: { chmod?: (path: string, mode: number) => Promise<void> } = {},
+  ): Promise<ApproverCredential> {
     const path = approverTokenPath(cwd);
+    const setMode = options.chmod ?? chmod;
 
     let secret: string;
     try {
@@ -109,7 +117,7 @@ export class ApproverCredential {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, `${secret}\n`, { encoding: 'utf8', mode: 0o600 });
       try {
-        await chmod(path, 0o600);
+        await setMode(path, 0o600);
       } catch {
         // A filesystem that does not support chmod is not a reason to
         // refuse to start. The file is inside the operator's own

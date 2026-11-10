@@ -512,9 +512,14 @@ var init_approver = __esm({
        *
        * The file is created with mode 0600 and chmod-ed afterwards, because
        * the file mode on creation is affected by the process umask.
+       *
+       * The chmod is injectable so the failure path can be tested: on
+       * Windows chmod never fails, so that path would otherwise only ever
+       * run on Linux, in CI, where nobody would notice it was uncovered.
        */
-      static async load(cwd) {
+      static async load(cwd, options = {}) {
         const path = approverTokenPath(cwd);
+        const setMode = options.chmod ?? chmod2;
         let secret;
         try {
           secret = (await readFile4(path, "utf8")).trim();
@@ -525,7 +530,7 @@ var init_approver = __esm({
           await writeFile5(path, `${secret}
 `, { encoding: "utf8", mode: 384 });
           try {
-            await chmod2(path, 384);
+            await setMode(path, 384);
           } catch {
           }
         }
@@ -4921,6 +4926,16 @@ var init_terminal = __esm({
           return new _ControllingTerminal(void 0, message);
         }
       }
+      /**
+       * A terminal with a handle the test controls.
+       *
+       * The real terminal is platform-dependent: on a Linux CI runner there
+       * is no `/dev/tty` at all, so the write and close paths would never
+       * run there. This makes them testable everywhere.
+       */
+      static forTesting(handle) {
+        return new _ControllingTerminal(handle);
+      }
       /** Whether there is a terminal to write to. */
       get available() {
         return !this.failed && this.handle !== void 0;
@@ -6966,6 +6981,7 @@ var PROXY = [
 var LOCALE = ["LANG", "LANGUAGE", "LC_ALL", "TZ"];
 function daemonEnvironment(options) {
   const source = options.source ?? process.env;
+  const platformName = options.platformName ?? platform();
   const env = {};
   const copy = (names) => {
     for (const name of names) {
@@ -6984,13 +7000,16 @@ function daemonEnvironment(options) {
     delete env["ANTHROPIC_API_KEY"];
     delete env["ANTHROPIC_BASE_URL"];
   }
-  if (platform() === "win32") {
+  if (isWindows(platformName)) {
     const appData = source["APPDATA"];
     if (appData !== void 0) env["APPDATA"] = appData;
     const localAppData = source["LOCALAPPDATA"];
     if (localAppData !== void 0) env["LOCALAPPDATA"] = localAppData;
   }
   return env;
+}
+function isWindows(platformName) {
+  return platformName === "win32";
 }
 
 // src/cli/commands/session.ts

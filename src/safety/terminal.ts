@@ -100,6 +100,17 @@ export class ControllingTerminal {
     }
   }
 
+  /**
+   * A terminal with a handle the test controls.
+   *
+   * The real terminal is platform-dependent: on a Linux CI runner there
+   * is no `/dev/tty` at all, so the write and close paths would never
+   * run there. This makes them testable everywhere.
+   */
+  static forTesting(handle: FileHandle): ControllingTerminal {
+    return new ControllingTerminal(handle);
+  }
+
   /** Whether there is a terminal to write to. */
   get available(): boolean {
     return !this.failed && this.handle !== undefined;

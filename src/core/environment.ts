@@ -62,8 +62,11 @@ export function daemonEnvironment(options: {
   modelKey?: string | undefined;
   /** Whether Mode B is on. */
   modeB?: boolean;
+  /** The platform. Defaults to this one. */
+  platformName?: NodeJS.Platform;
 }): NodeJS.ProcessEnv {
   const source = options.source ?? process.env;
+  const platformName = options.platformName ?? platform();
   const env: NodeJS.ProcessEnv = {};
 
   const copy = (names: readonly string[]): void => {
@@ -91,7 +94,7 @@ export function daemonEnvironment(options: {
   }
 
   // On Windows, some tools need these to find the system root.
-  if (platform() === 'win32') {
+  if (isWindows(platformName)) {
     const appData = source['APPDATA'];
     if (appData !== undefined) env['APPDATA'] = appData;
     const localAppData = source['LOCALAPPDATA'];
@@ -99,6 +102,18 @@ export function daemonEnvironment(options: {
   }
 
   return env;
+}
+
+/**
+ * Whether the platform is Windows.
+ *
+ * The platform is a parameter so the mapping can be tested for every
+ * platform, not just the one the test happens to run on. A branch that
+ * only runs on Windows would otherwise never run on the Linux CI runner
+ * that is the one that checks the coverage.
+ */
+export function isWindows(platformName: NodeJS.Platform): boolean {
+  return platformName === 'win32';
 }
 
 /**

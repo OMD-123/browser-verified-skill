@@ -13,7 +13,8 @@
  */
 import { describe, expect, it, afterAll } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { hashAction, ApprovalStore } from '../../src/safety/approvals.js';
@@ -324,6 +325,25 @@ describe('the approver credential file', () => {
     }
   });
 
+  it('survives a filesystem that cannot chmod', async () => {
+    // On Windows chmod never fails, so this path would otherwise only
+    // run on Linux, in CI, where nobody would notice it was uncovered.
+    // A filesystem that cannot chmod is not a reason to refuse to start.
+    const dir = await mkdtemp(join(tmpdir(), 'bv-approver-chmod-'));
+    try {
+      const credential = await ApproverCredential.load(dir, {
+        chmod: async () => {
+          throw new Error('chmod is not supported here');
+        },
+      });
+
+      expect(credential.revealSecret().length).toBeGreaterThan(0);
+      expect(credential.tokenHash.length).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('does not match a wrong secret', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'bv-approver-wrong-'));
     try {
@@ -425,6 +445,43 @@ describe('the controlling terminal', () => {
       expect(terminal.reason).toBeDefined();
     }
 
+    await terminal.close();
+  });
+
+  it('writes to the terminal and closes it', async () => {
+    // The real terminal is platform-dependent: a Linux CI runner has no
+    // `/dev/tty`, so the write and close paths would never run there.
+    // This exercises them everywhere.
+    const file = await mkdtemp(join(tmpdir(), 'bv-terminal-'));
+    const handle = await open(join(file, 'out.txt'), 'w');
+    const terminal = ControllingTerminal.forTesting(handle);
+
+    expect(terminal.available).toBe(true);
+
+    expect(await terminal.write('hello')).toBe(true);
+
+    await terminal.close();
+    // The handle is closed, so writing again is not possible.
+    expect(await terminal.write('more')).toBe(false);
+
+    const written = await readFile(join(file, 'out.txt'), 'utf8');
+    expect(written).toContain('hello');
+
+    await rm(file, { recursive: true, force: true });
+  });
+
+  it('reports a write that fails', async () => {
+    // A write that fails is not fatal: the approval still works through
+    // the code channel.
+    const handle = {
+      write: async () => {
+        throw new Error('the terminal went away');
+      },
+      close: async () => {},
+    } as unknown as FileHandle;
+
+    const terminal = ControllingTerminal.forTesting(handle);
+    expect(await terminal.write('hello')).toBe(false);
     await terminal.close();
   });
 
