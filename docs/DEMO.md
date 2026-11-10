@@ -3,6 +3,26 @@
 A real run of `bv` against the local fixture site. Nothing is mocked,
 nothing is retyped, and every refusal in it is the tool's own.
 
+## Two audiences, one run
+
+| Output          | For      | How      |
+| --------------- | -------- | -------- |
+| `docs/demo.mp4` | a person | watch it |
+| `bv demo`       | an agent | read it  |
+
+An agent cannot watch two and a half minutes of a terminal and quote
+what it saw, but it can read a file. So the same run has both outputs.
+
+```bash
+bv demo
+```
+
+It starts the local fixture site, drives a real browser, and prints the
+whole thing as a document: every command, every exit code, and every
+refusal with the reason it gave. It ends with what an agent should take
+from it — exit 4 means a human must approve, exit 5 means stop, exit 3
+means the plan does not cover this.
+
 ## Watch it
 
 `docs/demo.mp4` — 2 minutes 33 seconds, 1440x810.

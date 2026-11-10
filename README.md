@@ -55,8 +55,12 @@ A real run of `bv` against a local fixture site. Nothing is mocked.
 
 [![the demo](docs/demo.mp4)](docs/demo.mp4)
 
-**[Watch the demo (2:33)](docs/demo.mp4)** — or run it yourself with
-`npm run demo`.
+**[Watch the demo (2:33)](docs/demo.mp4)** — or run it yourself:
+
+```bash
+bv demo          # the same run, as a document an agent can read
+npm run demo     # the same run, as a video
+```
 
 It shows the refusals, because the refusals are the product:
 
