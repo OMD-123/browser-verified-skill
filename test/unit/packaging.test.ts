@@ -146,12 +146,15 @@ describe('the published artifact', () => {
     expect(missing, `the postinstall does not handle: ${missing.join(', ')}`).toEqual([]);
   });
 
-  it('runs the postinstall as part of the install', async () => {
+  it('does not run the postinstall as part of the install', async () => {
+    // It used to. The native binding is needed to RUN THE TESTS, not to
+    // use the tool, so every end user's install was running a dev-only
+    // fix.
     const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
 
-    expect(manifest.scripts?.['postinstall']).toContain('ensure-native-binding');
+    expect(manifest.scripts?.['postinstall']).toBeUndefined();
   });
 
   it('pins playwright and @playwright/test to the same version', async () => {
@@ -310,6 +313,36 @@ describe('the published artifact', () => {
 
     const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
     expect(readme).toContain(`**${claims.length} claims**`);
+  });
+
+  it("does not run a dev-only fix on an end user's install", async () => {
+    // The gap: the native-binding script was a `postinstall`, so every
+    // end user's `npm install` ran a fix that only matters for running
+    // the tests. It belongs in CI, not in an install.
+    const manifest = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+      files?: string[];
+    };
+
+    expect(manifest.scripts?.postinstall).toBeUndefined();
+    expect(manifest.scripts?.preinstall).toBeUndefined();
+    expect(manifest.scripts?.install).toBeUndefined();
+
+    // And the script itself is not shipped.
+    expect(manifest.files ?? []).not.toContain('scripts/ensure-native-binding.mjs');
+  });
+
+  it('runs the native-binding script in CI instead', async () => {
+    const workflow = await readFile(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+
+    // CI installs it explicitly, because the tests need it.
+    expect(workflow).toContain('scripts/ensure-native-binding.mjs');
+
+    // Every job that installs dependencies runs it. The count is the
+    // number of `npm ci` lines, which the binding lines must match.
+    const installs = (workflow.match(/npm ci/g) ?? []).length;
+    const bindings = workflow.match(/node scripts\/ensure-native-binding\.mjs/g) ?? [];
+    expect(bindings.length).toBe(installs);
   });
 
   it('has no native dependencies, as the README claims', async () => {

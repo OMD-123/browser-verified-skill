@@ -31,6 +31,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ensure the native binding
+        # The native binding for rolldown is needed to RUN THE TESTS, not
+        # to use the tool. It was a postinstall, which meant every end
+        # user's `npm install` ran a dev-only fix. It runs here instead.
+        run: node scripts/ensure-native-binding.mjs
+
       - name: Install Playwright Chromium
         # The browser build must match the pinned `playwright` version, or
         # the code looks for a revision that was never downloaded. The
@@ -83,6 +89,10 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      # The native binding for rolldown is needed to RUN THE TESTS, not
+      # to use the tool. It was a postinstall, which meant every end
+      # user's `npm install` ran a dev-only fix. It runs here instead.
+      - run: node scripts/ensure-native-binding.mjs
       - run: npx playwright install chromium
       - run: node -e "const p=require('playwright');const fs=require('fs');if(!fs.existsSync(p.chromium.executablePath())){console.error('the expected browser is missing:',p.chromium.executablePath());process.exit(1)}"
       - run: npm run typecheck
@@ -101,6 +111,10 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      # The native binding for rolldown is needed to RUN THE TESTS, not
+      # to use the tool. It was a postinstall, which meant every end
+      # user's `npm install` ran a dev-only fix. It runs here instead.
+      - run: node scripts/ensure-native-binding.mjs
       - run: npx playwright install chromium
       - run: node -e "const p=require('playwright');const fs=require('fs');if(!fs.existsSync(p.chromium.executablePath())){console.error('the expected browser is missing:',p.chromium.executablePath());process.exit(1)}"
       - run: npm run typecheck
