@@ -49,22 +49,57 @@ unknown button is not silently allowed.
 Verdicts are `allow | deny | needs_approval`, each carrying machine-readable
 `ruleIds` and human-readable `reasons`.
 
-### 2.2 Approval gate (`src/safety/approvals.ts`)
+### 2.2 Approval gate (`src/safety/approvals.ts`, `src/safety/approver.ts`)
 
 Actions in a class listed under `actionClasses.approvalRequired` (and any action
-the classifier could not confidently classify) require approval. Approval is
-obtained either:
+the classifier could not confidently classify) require approval.
 
-- interactively, from a TTY prompt that shows the exact action, target and
-  resolved URL; or
-- by issuing a one-time token with `bv approve <actionId>`.
+**The agent cannot approve its own actions.** Two roles, two credentials:
+
+- the **agent** holds the daemon token in `.bv/daemon.token`. It proposes
+  actions, reads snapshots, and does everything else a client can do.
+- the **approver** holds a separate credential in `.bv/approver.token` (mode
+  0600), which the agent's process never reads.
+
+The daemon checks the approver credential before any approval method runs, in
+the request path rather than in a handler, so no handler can forget to check
+it. A request carrying only the daemon token is refused with 403.
+
+A human approves in one of two ways:
+
+- **A controlling terminal.** The daemon opens `/dev/tty` (`CONOUT$` on
+  Windows) and writes the prompt there: the exact action, target, resolved URL
+  and a short one-time code. The agent's process has no handle on that
+  descriptor, so the code never travels anywhere the agent can reach.
+- **The one-time code.** Six characters from a 29-character alphabet with no
+  ambiguous characters, bound to one action, expiring after five minutes and
+  consumed on use. `bv approve <actionId> --code CODE` needs no credential:
+  the code _is_ the human's proof. The channel locks after ten wrong codes.
+
+`bv approvals` lists what is waiting.
 
 Tokens are `HMAC-SHA256(serverKey, actionId‖actionHash‖issuedAt‖nonce)`, bound to
 the **exact action hash** that was presented when approval was requested, and
-**consumed atomically** on use. A token therefore cannot be replayed, and cannot
-be used to approve a different action.
+**consumed atomically** on use.
 
-In non-interactive mode the default is **deny**.
+The action hash covers the action's **kind, target and value**, and the
+**context**: the page origin, the resolved URL after redirects, and the run id.
+So a token approved for "click Submit" on one page cannot be spent on another,
+and cannot cross runs.
+
+A prompt-injection **block** is not an approval case. It is a hard refusal
+with its own exit code (5), and it cannot be approved away: approving it is
+the attack succeeding. A **review** finding is an approval case (exit code 4).
+
+In non-interactive mode a non-interactive session cannot ask for an approval
+on the spot, so the verdict is **needs approval** (exit code 4), not a denial.
+That distinction matters: a denial says "do not do this", while an approval
+request says "do not do this without a human's say-so". The operator can
+approve out of band -- in another terminal, or with the one-time code -- and
+retry with the token.
+
+A prompt-injection block is still a hard refusal in either mode. It is not an
+approval case at all.
 
 ### 2.3 Plan-lock (`src/safety/planlock.ts`)
 

@@ -124,7 +124,7 @@ This is what the package _is_. Three ways to wire it in:
 // Claude Desktop / Claude Code
 {
   "mcpServers": {
-    "browser-verified": {
+    "browser-verified-skill": {
       "command": "bv",
       "args": ["mcp"],
     },
@@ -470,7 +470,7 @@ bv redteam run
 ```
 
 ```text
-16 of 16 attack(s) were caught.
+17 of 17 attack(s) were caught.
 
   ✓ an instruction in the page text  (instruction phrases)
   ✓ a right-to-left override  (bidi control characters)
@@ -532,20 +532,22 @@ browser-verified-skill/
 ├── scripts/acceptance.mjs   # the end-to-end claim checker
 ├── policies/default.yaml    # the shipped default policy
 ├── src/
-│   ├── cli/                 # commander wiring only
-│   ├── core/                # daemon, client, contexts, paths, exit codes
-│   ├── perception/          # snapshot, diff, prune, refs, tokens
-│   ├── actions/             # locate, act, waits, download, frames
-│   ├── safety/              # policy, approvals, planlock, taint, injection, vault
-│   ├── verify/              # conditions, verifier, evidence, extract
-│   ├── compile/             # recorder, compiler, replay, heal, drift
-│   ├── interaction/         # typing, mouse, profiles, throttle
-│   ├── testing/             # suite, console, a11y, perf, visual, flake, diff, redteam
-│   ├── agent/               # the agent loop and the cost report
-│   ├── llm/                 # client, router, budget
-│   ├── mcp/                 # the MCP server and its wiring
-│   ├── memory/              # playbooks and skills
-│   └── types/               # shared types
+<!-- BEGIN GENERATED TREE -->
+│   ├── cli/  # commander wiring only
+│   ├── core/  # daemon, client, contexts, paths, exit codes
+│   ├── perception/  # snapshot, diff, prune, refs, tokens
+│   ├── actions/  # locate, act, waits, download, frames
+│   ├── safety/  # policy, approvals, planlock, taint, injection, vault
+│   ├── verify/  # conditions, verifier, evidence, extract
+│   ├── compile/  # recorder, compiler, replay, heal, drift
+│   ├── interaction/  # typing, mouse, profiles, throttle
+│   ├── testing/  # suite, console, a11y, perf, visual, flake, diff, redteam
+│   ├── agent/  # the agent loop and the cost report
+│   ├── llm/  # client, router, budget
+│   ├── mcp/  # the MCP server and its wiring
+│   ├── memory/  # playbooks and skills
+│   ├── types/  # shared types
+<!-- END GENERATED TREE -->
 ├── fixtures/                # local test site (no network)
 ├── evals/                   # coverage probes and harnesses
 ├── test/                    # unit, integration, e2e, redteam

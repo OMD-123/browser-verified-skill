@@ -74,6 +74,11 @@ jobs:
       - name: Verify the bundled CLI runs
         run: node scripts/bv.mjs --version
 
+      - name: Check the generated docs
+        # The README's source tree is generated from the real folders.
+        # A doc that is out of date is a doc that is wrong.
+        run: npm run docs:check
+
       - name: Acceptance claims
         run: npm run acceptance
 
