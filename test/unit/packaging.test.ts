@@ -347,6 +347,31 @@ describe('the published artifact', () => {
     expect(demo).toContain('verify');
   });
 
+  it('has video players in the README that point at real files', async () => {
+    // GitHub renders a <video> tag. If the src or the poster is missing,
+    // the README shows a black box and nobody can tell it is broken.
+    const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+
+    const videos = [...readme.matchAll(/<video\s+src="([^"]+)"/g)].map((m) => m[1] ?? '');
+    expect(videos.length, 'the README has no video player').toBeGreaterThan(0);
+
+    for (const src of videos) {
+      expect(existsSync(join(ROOT, src)), `${src} is referenced but does not exist`).toBe(true);
+    }
+
+    const posters = [...readme.matchAll(/poster="([^"]+)"/g)].map((m) => m[1] ?? '');
+    expect(posters.length, 'a video has no poster').toBe(videos.length);
+
+    for (const poster of posters) {
+      expect(existsSync(join(ROOT, poster)), `${poster} is missing`).toBe(true);
+    }
+
+    // Every video has a fallback link, for a reader on a client that
+    // does not render video.
+    expect(readme).toContain('<a href="docs/agent-demo.mp4">');
+    expect(readme).toContain('<a href="docs/demo.mp4">');
+  });
+
   it('has an agent demo where the agent refuses to work around a refusal', async () => {
     // The agent demo's whole claim is that Hermes, given a link, uses the
     // skill correctly -- including respecting a refusal it cannot get

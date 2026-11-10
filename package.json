@@ -77,7 +77,11 @@
     "docs/SECURITY.md",
     "docs/KNOWN_LIMITATIONS.md",
     "docs/DEMO.md",
-    "docs/AGENT-DEMO.md"
+    "docs/AGENT-DEMO.md",
+    "docs/agent-demo.mp4",
+    "docs/agent-demo-poster.jpg",
+    "docs/demo.mp4",
+    "docs/demo-poster.jpg"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

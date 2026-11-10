@@ -64,7 +64,17 @@ handed a repo URL and a task. It installs the skill, reads the docs,
 fills a form, gets a human's approval for the submit, and then meets a
 prompt-injection payload — and **does not work around the refusal**.
 
-[![the agent demo](docs/agent-demo.mp4)](docs/agent-demo.mp4)
+<p align="center">
+  <video src="docs/demo.mp4" poster="docs/demo-poster.jpg" width="820" controls preload="metadata">
+    <a href="docs/demo.mp4">Watch the tool demo (2:33)</a>
+  </video>
+</p>
+
+<p align="center">
+  <video src="docs/agent-demo.mp4" poster="docs/agent-demo-poster.jpg" width="820" controls preload="metadata">
+    <a href="docs/agent-demo.mp4">Watch the agent demo (2:14)</a>
+  </video>
+</p>
 
 **[Watch the agent demo (2:14)](docs/agent-demo.mp4)** — or run it yourself:
 
