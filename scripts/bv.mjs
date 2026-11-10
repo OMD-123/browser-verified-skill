@@ -4843,7 +4843,7 @@ var init_approvals = __esm({
 
 // src/safety/terminal.ts
 import { open } from "fs/promises";
-import { platform } from "os";
+import { platform as platform2 } from "os";
 function terminalPathFor(platformName) {
   if (platformName === "win32") {
     return "\\\\.\\CONOUT$";
@@ -4851,7 +4851,7 @@ function terminalPathFor(platformName) {
   return "/dev/tty";
 }
 function controllingTerminalPath() {
-  return terminalPathFor(platform());
+  return terminalPathFor(platform2());
 }
 function approvalPrompt(options) {
   const lines = [
@@ -6949,6 +6949,51 @@ init_exit();
 init_client();
 init_daemon_info();
 init_contact();
+
+// src/core/environment.ts
+import { platform } from "os";
+var ALWAYS = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "COMSPEC"];
+var PROXY = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "ALL_PROXY",
+  "all_proxy"
+];
+var LOCALE = ["LANG", "LANGUAGE", "LC_ALL", "TZ"];
+function daemonEnvironment(options) {
+  const source = options.source ?? process.env;
+  const env = {};
+  const copy = (names) => {
+    for (const name of names) {
+      const value = source[name];
+      if (value !== void 0) env[name] = value;
+    }
+  };
+  copy(ALWAYS);
+  copy(PROXY);
+  copy(LOCALE);
+  if (options.modeB === true && options.modelKey !== void 0) {
+    env["ANTHROPIC_API_KEY"] = options.modelKey;
+    const base = source["ANTHROPIC_BASE_URL"];
+    if (base !== void 0) env["ANTHROPIC_BASE_URL"] = base;
+  } else {
+    delete env["ANTHROPIC_API_KEY"];
+    delete env["ANTHROPIC_BASE_URL"];
+  }
+  if (platform() === "win32") {
+    const appData = source["APPDATA"];
+    if (appData !== void 0) env["APPDATA"] = appData;
+    const localAppData = source["LOCALAPPDATA"];
+    if (localAppData !== void 0) env["LOCALAPPDATA"] = localAppData;
+  }
+  return env;
+}
+
+// src/cli/commands/session.ts
 init_paths();
 init_errors();
 function daemonEntry() {
@@ -6995,7 +7040,13 @@ function spawnDaemon(options, spawner = (command, args, options2) => spawn(comma
     cwd: options.cwd,
     detached: true,
     stdio: "ignore",
-    env: process.env
+    // The daemon gets a MINIMAL environment. It used to get the whole
+    // of the parent's, which meant every secret the operator had in
+    // their shell went to a browser process that had no use for it.
+    env: daemonEnvironment({
+      ...options.modelKey !== void 0 ? { modelKey: options.modelKey } : {},
+      ...options.modeB !== void 0 ? { modeB: options.modeB } : {}
+    })
   });
   child.unref();
   if (child.pid === void 0) {
@@ -7043,12 +7094,15 @@ function registerSession(program) {
       if (existing !== void 0) {
         await clearDaemonInfo(global.cwd);
       }
+      const modelKey = process.env["ANTHROPIC_API_KEY"];
+      const modeB = modelKey !== void 0 && modelKey.length > 0;
       const pid = spawnDaemon({
         cwd: global.cwd,
         headed: options.headed === true,
         session: options.session ?? "default",
         ...options.contact !== void 0 ? { contact: options.contact } : {},
-        ...options.runId !== void 0 ? { runId: options.runId } : {}
+        ...options.runId !== void 0 ? { runId: options.runId } : {},
+        ...modeB ? { modelKey, modeB: true } : {}
       });
       await waitForDaemon(global.cwd);
       const info = await readDaemonInfo(global.cwd);

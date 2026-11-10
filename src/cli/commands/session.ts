@@ -11,6 +11,7 @@ import { EXIT } from '../../core/exit.js';
 import { connectDaemon } from '../../core/client.js';
 import { readDaemonInfo, clearDaemonInfo, isProcessAlive } from '../../core/daemon-info.js';
 import { isPlaceholderContact } from '../../safety/contact.js';
+import { daemonEnvironment } from '../../core/environment.js';
 import { ensureBvDir } from '../../core/paths.js';
 import { emit, globalOptions } from '../helpers.js';
 import { UsageError } from '../../core/errors.js';
@@ -85,6 +86,10 @@ export function spawnDaemon(
     session: string;
     contact?: string;
     runId?: string;
+    /** The model key to forward, if Mode B is on. */
+    modelKey?: string;
+    /** Whether Mode B is on. */
+    modeB?: boolean;
   },
   spawner: (
     command: string,
@@ -110,7 +115,13 @@ export function spawnDaemon(
     cwd: options.cwd,
     detached: true,
     stdio: 'ignore',
-    env: process.env,
+    // The daemon gets a MINIMAL environment. It used to get the whole
+    // of the parent's, which meant every secret the operator had in
+    // their shell went to a browser process that had no use for it.
+    env: daemonEnvironment({
+      ...(options.modelKey !== undefined ? { modelKey: options.modelKey } : {}),
+      ...(options.modeB !== undefined ? { modeB: options.modeB } : {}),
+    }),
   });
 
   child.unref();
@@ -183,12 +194,20 @@ export function registerSession(program: Command): void {
           await clearDaemonInfo(global.cwd);
         }
 
+        // The model key is passed EXPLICITLY, and only when Mode B is
+        // on. The daemon's environment is built from a list, so a key in
+        // the operator's shell does not reach the browser process
+        // unless the operator asked for Mode B.
+        const modelKey = process.env['ANTHROPIC_API_KEY'];
+        const modeB = modelKey !== undefined && modelKey.length > 0;
+
         const pid = spawnDaemon({
           cwd: global.cwd,
           headed: options.headed === true,
           session: options.session ?? 'default',
           ...(options.contact !== undefined ? { contact: options.contact } : {}),
           ...(options.runId !== undefined ? { runId: options.runId } : {}),
+          ...(modeB ? { modelKey, modeB: true } : {}),
         });
 
         await waitForDaemon(global.cwd);

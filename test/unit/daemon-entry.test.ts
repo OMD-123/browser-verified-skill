@@ -94,6 +94,32 @@ describe('the daemon entry point', () => {
     expect(call.args).toContain('run-9');
   });
 
+  it('spawns the daemon with a minimal environment', () => {
+    // The gap: the daemon used to be spawned with the WHOLE parent
+    // environment, so every secret the operator had in their shell went
+    // to a browser process that had no use for it.
+    const calls: {
+      options: { cwd: string; detached: boolean; stdio: string; env: NodeJS.ProcessEnv };
+    }[] = [];
+
+    spawnDaemon(
+      { cwd: '/tmp/work', headed: false, session: 'default' },
+      (_command, _args, options) => {
+        calls.push({ options });
+        return { pid: 1, unref: () => {} };
+      },
+    );
+
+    const env = calls[0]!.options.env;
+
+    // The browser needs these.
+    expect(env['PATH']).toBeDefined();
+
+    // The model key is NOT forwarded in Mode A, even when the ambient
+    // environment has one.
+    expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+  });
+
   it('leaves the optional flags out when they are not given', () => {
     const calls: { args: string[] }[] = [];
 
