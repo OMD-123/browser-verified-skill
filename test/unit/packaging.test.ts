@@ -234,7 +234,7 @@ describe('the published artifact', () => {
       .map((line) => line.trim().split(/\s+/)[0])
       .filter((name) => name !== 'help');
 
-    expect(commands.length).toBe(27);
+    expect(commands.length).toBe(28);
 
     const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
     expect(readme).toContain(`${commands.length} commands`);
@@ -315,6 +315,62 @@ describe('the published artifact', () => {
 
     const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
     expect(readme).toContain(`**${claims.length} claims**`);
+  });
+
+  it('has a demo command that an agent can run', async () => {
+    // The demo is the agent's version of the video. It has to exist,
+    // and it has to be runnable without a network.
+    const demo = await readFile(join(ROOT, 'src', 'cli', 'commands', 'demo.ts'), 'utf8');
+
+    // It runs the agent-readable script.
+    expect(demo).toContain('demo-agent.sh');
+
+    // And it is registered, so `bv demo` works.
+    const main = await readFile(join(ROOT, 'src', 'cli', 'main.ts'), 'utf8');
+    expect(main).toContain('registerDemo');
+  });
+
+  it('has a demo that runs against the fixture site', async () => {
+    // The demo is documentation that executes. If it breaks, the
+    // recording is a lie.
+    const demo = await readFile(join(ROOT, 'scripts', 'demo.sh'), 'utf8');
+
+    // It must start the fixture site itself, or it depends on something
+    // that is not running.
+    expect(demo).toContain('fixtures/server.ts');
+
+    // It must exercise the things the recording claims to show.
+    expect(demo).toContain('injected.html');
+    expect(demo).toContain('--from-ref');
+    expect(demo).toContain('approve');
+    expect(demo).toContain('compile');
+    expect(demo).toContain('verify');
+  });
+
+  it('has an agent-readable demo that teaches the exit codes', async () => {
+    // The point of the agent-readable demo is that an agent learns what
+    // each exit code means. So the exit codes have to be in it.
+    const agentDemo = await readFile(join(ROOT, 'scripts', 'demo-agent.sh'), 'utf8');
+
+    expect(agentDemo).toContain('Exit code');
+    expect(agentDemo).toContain('What an agent should take from this');
+
+    // And the lesson has to name the codes it is teaching.
+    expect(agentDemo).toContain('Exit 4 means a human must approve');
+    expect(agentDemo).toContain('Exit 5 means stop');
+    expect(agentDemo).toContain('Exit 3 means the plan does not cover this');
+  });
+
+  it('has the fixture page the demo needs', async () => {
+    const page = await readFile(join(ROOT, 'fixtures', 'pages', 'injected.html'), 'utf8');
+
+    // The payload has to be invisible to a sighted user and visible to
+    // a snapshot. That is the whole point of the fixture.
+    expect(page).toContain('opacity: 0');
+    expect(page).toContain('Ignore all previous instructions');
+
+    // And the scanner has to recognise it.
+    expect(page.toLowerCase()).toContain('system:');
   });
 
   it('tells the same story about non-interactive approval everywhere', async () => {

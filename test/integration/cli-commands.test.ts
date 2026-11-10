@@ -14,6 +14,7 @@ import { registerSafety } from '../../src/cli/commands/safety.js';
 import { registerQa } from '../../src/cli/commands/qa.js';
 import { registerSession } from '../../src/cli/commands/session.js';
 import { registerPerception } from '../../src/cli/commands/perception.js';
+import { registerDemo } from '../../src/cli/commands/demo.js';
 import { setRootProgram } from '../../src/cli/helpers.js';
 import { connectDaemon, createApproverClient, type DaemonClient } from '../../src/core/client.js';
 import type { readRun as ReadRunType } from '../../src/core/runstore/store.js';
@@ -70,6 +71,7 @@ async function run(cwd: string, args: string[]): Promise<Captured> {
   registerQa(program);
   registerSession(program);
   registerPerception(program);
+  registerDemo(program);
 
   let stdout = '';
   let stderr = '';
@@ -319,6 +321,15 @@ describe('the CLI command modules', () => {
   it('prunes the memory', async () => {
     const result = await run(dir, ['memory', 'prune']);
     expect(result.stdout).toContain('expired');
+  });
+
+  // --- bv demo ------------------------------------------------
+
+  it('says so when the demo script is missing', async () => {
+    const result = await run(dir, ['demo', '--script', 'C:/does/not/exist.sh']);
+
+    expect(result.stdout + result.stderr, 'the error was not printed').toContain('not found');
+    expect(result.exitCode, `the exit code was ${result.exitCode}`).toBe(1);
   });
 
   // --- bv plan -----------------------------------------------------------

@@ -3231,9 +3231,9 @@ async function startDaemon(options) {
   const server = createServer((req, res) => {
     void handleRequest(req, res, options, tokenHash, maxBodyBytes);
   });
-  await new Promise((resolve5, reject) => {
+  await new Promise((resolve6, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve5());
+    server.listen(0, "127.0.0.1", () => resolve6());
   });
   const address = server.address();
   if (address === null || typeof address === "string") {
@@ -3255,8 +3255,8 @@ async function startDaemon(options) {
     info,
     server,
     close: async () => {
-      await new Promise((resolve5) => {
-        server.close(() => resolve5());
+      await new Promise((resolve6) => {
+        server.close(() => resolve6());
         server.closeAllConnections?.();
       });
     }
@@ -4165,8 +4165,8 @@ async function evaluateFrames(locator, frames) {
     const view = ownerDocument.defaultView;
     if (view === null) return;
     for (let i = 0; i < count; i++) {
-      await new Promise((resolve5) => {
-        view.requestAnimationFrame(() => resolve5());
+      await new Promise((resolve6) => {
+        view.requestAnimationFrame(() => resolve6());
       });
     }
   }, frames);
@@ -4225,7 +4225,7 @@ async function waitForReceivesEvents(locator, timeout) {
   throw new Error(`element did not receive events within ${timeout}ms: ${lastReason}`);
 }
 function delay(ms) {
-  return new Promise((resolve5) => setTimeout(resolve5, ms));
+  return new Promise((resolve6) => setTimeout(resolve6, ms));
 }
 var init_waits = __esm({
   "src/actions/waits.ts"() {
@@ -6595,8 +6595,8 @@ async function runDaemonProcess(options) {
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
-  await new Promise((resolve5) => {
-    daemon.server.once("close", () => resolve5());
+  await new Promise((resolve6) => {
+    daemon.server.once("close", () => resolve6());
   });
 }
 var extractedValues, APPROVER_METHODS, ACTION_CLASS_SET, ACTION_KINDS2;
@@ -9677,6 +9677,61 @@ async function newestRun(cwd) {
   }
 }
 
+// src/cli/commands/demo.ts
+import { spawn as spawn2 } from "child_process";
+import { tmpdir as tmpdir2 } from "os";
+import { existsSync as existsSync5 } from "fs";
+import { dirname as dirname10, resolve as resolve5 } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
+init_exit();
+function demoScript() {
+  const here = dirname10(fileURLToPath4(import.meta.url));
+  const candidates = [
+    resolve5(here, "..", "..", "scripts", "demo-agent.sh"),
+    resolve5(here, "..", "..", "..", "scripts", "demo-agent.sh"),
+    resolve5(here, "..", "..", "..", "..", "scripts", "demo-agent.sh"),
+    resolve5(process.cwd(), "scripts", "demo-agent.sh")
+  ];
+  for (const candidate of candidates) {
+    if (existsSync5(candidate)) return candidate;
+  }
+  return void 0;
+}
+function registerDemo(program) {
+  program.command("demo").description("run the demo and print it as a document an agent can read").option("--script <path>", "the demo script to run").option("--workspace <dir>", "the workspace the demo runs in").action(async (options, cmd) => {
+    const script = options.script !== void 0 ? existsSync5(options.script) ? options.script : void 0 : demoScript();
+    if (script === void 0) {
+      emit(
+        cmd,
+        fail(
+          { error: "the demo script was not found" },
+          [
+            "the demo script was not found. It ships with the source tree;",
+            "from a published package, run `bash scripts/demo-agent.sh` yourself."
+          ],
+          EXIT.FAILURE
+        )
+      );
+      return;
+    }
+    const workspace = options.workspace ?? tmpdir2();
+    const child = spawn2("bash", [script], {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        DEMO_WORKSPACE: workspace
+      },
+      stdio: "inherit"
+    });
+    await new Promise((resolvePromise) => {
+      child.on("close", (code) => {
+        process.exitCode = code ?? 0;
+        resolvePromise();
+      });
+    });
+  });
+}
+
 // src/cli/main.ts
 function buildProgram() {
   const program = new Command();
@@ -9688,6 +9743,7 @@ function buildProgram() {
   registerSafety(program);
   registerProof(program);
   registerQa(program);
+  registerDemo(program);
   setRootProgram(program);
   return program;
 }

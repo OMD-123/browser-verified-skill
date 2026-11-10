@@ -3,6 +3,32 @@
 Every command takes `--help` and `--json`, and every command has a
 meaningful exit code.
 
+## bv demo
+
+```bash
+bv demo [--cwd <dir>]
+```
+
+Runs the demo and prints it as a document an agent can read.
+
+There is a video of the demo, for a person. An agent cannot watch two
+and a half minutes of a terminal and quote what it saw, but it can read
+a file. So the same run has two outputs:
+
+- `docs/demo.mp4` -- a person watches it
+- `bv demo` -- an agent reads it
+
+The output is the same run written as a document: every command, every
+exit code, and every refusal with the reason it gave. It ends with what
+an agent should take from it -- exit 4 means a human must approve, exit
+5 means stop, exit 3 means the plan does not cover this.
+
+```bash
+bv demo --cwd /tmp/my-workspace
+```
+
+The demo starts the local fixture site itself, so it needs no network.
+
 ## The exit codes
 
 | Code | Meaning                    |

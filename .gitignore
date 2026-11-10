@@ -38,3 +38,6 @@ npm-debug.log*
 # Local install logs
 .npm-install*.log
 .pw-install.log
+
+# The demo workspace, if it was pointed at the repo.
+.bv-demo/

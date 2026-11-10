@@ -25,6 +25,7 @@ walls trigger a human handoff, and `robots.txt` is respected.
 
 ## Table of contents
 
+- [The demo](#the-demo)
 - [What problem this solves](#what-problem-this-solves)
 - [The 60-second quickstart](#the-60-second-quickstart)
 - [How it works](#how-it-works)
@@ -47,6 +48,28 @@ walls trigger a human handoff, and `robots.txt` is respected.
 - [License](#license)
 
 ---
+
+## The demo
+
+A real run of `bv` against a local fixture site. Nothing is mocked.
+
+[![the demo](docs/demo.mp4)](docs/demo.mp4)
+
+**[Watch the demo (2:33)](docs/demo.mp4)** — or run it yourself with
+`npm run demo`.
+
+It shows the refusals, because the refusals are the product:
+
+- a page carries an **invisible prompt-injection payload**; acting on it
+  is refused with **exit 5**, and it **cannot be approved away**
+- the **agent cannot approve its own action** — a separate credential, in
+  a file the agent's process never reads
+- a value **read out of the page is tainted**, not trusted
+- a submit needs a human, the human says yes, and the run continues
+- the run is **verified against the live page**, then **compiled into a
+  plain Playwright script** that runs in CI
+
+See [docs/DEMO.md](docs/DEMO.md) for what each step shows.
 
 ## What problem this solves
 
@@ -215,7 +238,7 @@ the tool goes through it.** The CLI, the MCP server and the agent loop all call 
 
 ## The command surface
 
-27 commands. Every one supports `--help`, `--json` and a meaningful exit code.
+28 commands. Every one supports `--help`, `--json` and a meaningful exit code.
 
 | Exit code | Meaning             |
 | --------- | ------------------- |
@@ -234,6 +257,7 @@ bv session start|stop|status         bv research --questions q.json --sources ur
 bv plan set|show|amend              bv discover-api <runId> [--openapi]
 bv snapshot [--full] [--max-tokens N] bv vault set|list|rm
 bv act <kind> <target> [value]       bv memory ls|rm|prune
+bv demo                              the demo, as a document an agent reads
 bv approve <actionId>                bv redteam run
 bv approvals                          bv dryrun-report [--run <runId>]
 bv verify --condition cond.json      bv report <runId> [--format md|json]

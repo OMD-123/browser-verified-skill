@@ -75,7 +75,8 @@
     "LICENSE",
     "README.md",
     "docs/SECURITY.md",
-    "docs/KNOWN_LIMITATIONS.md"
+    "docs/KNOWN_LIMITATIONS.md",
+    "docs/DEMO.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -90,6 +91,8 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "build": "tsup",
+    "demo": "bash scripts/demo.sh",
+    "demo:record": "python3 scripts/render-demo.py",
     "docs:tree": "tsx scripts/generate-tree.ts",
     "docs:check": "tsx scripts/check-docs.ts",
     "cli": "tsx src/cli/main.ts",
