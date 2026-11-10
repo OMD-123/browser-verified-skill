@@ -43,6 +43,19 @@ bv doctor [--install]       # check node, the browser, the permissions and the p
 bv init                     # create .bv/ and write a default policy
 ```
 
+### The contact URL
+
+The user agent carries a contact URL so a site owner can reach whoever
+is running the automation. It is only there if it is REAL:
+
+- pass `--contact https://yoursite/contact` when starting a session, or
+- list your site in the policy's `ownedOrigins`
+
+A placeholder contact is refused. `bv session start --contact
+https://your-site/contact` exits 2, because that URL goes nowhere and
+"honest" has to mean something. A session with no real contact simply
+has no contact in its user agent.
+
 ## The sessions
 
 ```bash

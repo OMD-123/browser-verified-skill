@@ -9,7 +9,8 @@ import { dirname, resolve } from 'node:path';
 import { ok, fail } from '../../core/output.js';
 import { EXIT } from '../../core/exit.js';
 import { connectDaemon } from '../../core/client.js';
-import { readDaemonInfo, isProcessAlive, clearDaemonInfo } from '../../core/daemon-info.js';
+import { readDaemonInfo, clearDaemonInfo, isProcessAlive } from '../../core/daemon-info.js';
+import { isPlaceholderContact } from '../../safety/contact.js';
 import { ensureBvDir } from '../../core/paths.js';
 import { emit, globalOptions } from '../helpers.js';
 import { UsageError } from '../../core/errors.js';
@@ -147,6 +148,21 @@ export function registerSession(program: Command): void {
       const global = globalOptions(cmd);
       try {
         await ensureBvDir(global.cwd);
+
+        // A placeholder contact URL is refused. It is not a contact: it
+        // goes nowhere, and a session that ships it in the user agent
+        // tells a site owner to contact a domain that is not theirs.
+        // The operator can pass a real one with --contact.
+        if (options.contact !== undefined && isPlaceholderContact(options.contact)) {
+          const message =
+            `"${options.contact}" is a placeholder contact URL, not a contact. ` +
+            'Pass a real one with --contact, or leave it out so the user agent has none.';
+          emit(
+            cmd,
+            fail({ error: 'placeholder_contact', contact: options.contact }, [message], EXIT.USAGE),
+          );
+          return;
+        }
 
         const existing = await readDaemonInfo(global.cwd);
         if (existing !== undefined && isProcessAlive(existing.pid)) {

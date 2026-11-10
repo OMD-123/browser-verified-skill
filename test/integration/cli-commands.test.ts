@@ -437,6 +437,16 @@ describe('the CLI command modules', () => {
 
   // --- bv session ---------------------------------------------------------
 
+  it('refuses to start a session on a placeholder contact URL', async () => {
+    // A placeholder is not a contact. It goes nowhere, so a session
+    // that ships it tells a site owner to contact a domain that is not
+    // theirs.
+    const result = await run(dir, ['session', 'start', '--contact', 'https://your-site/contact']);
+
+    expect(result.stdout).toContain('placeholder contact');
+    expect(result.exitCode).toBe(2);
+  });
+
   it('says no session is running', async () => {
     // No daemon info file, so there is nothing to stop.
     const result = await run(dir, ['session', 'stop']);

@@ -20,6 +20,7 @@ import { renderDiff, renderTree } from '../perception/render.js';
 import { performAction, type ActionOutcome } from '../actions/act.js';
 import type { ActionRequest } from '../actions/locate.js';
 import { VERSION } from '../version.js';
+import { stripUrlMarker } from '../safety/contact.js';
 
 /** Options for creating a session. */
 export interface SessionOptions {
@@ -426,7 +427,10 @@ function countAll(nodes: readonly AxNode[]): number {
  * can identify and contact whoever is running the automation.
  */
 export function buildUserAgent(contact: string | undefined): string {
-  const suffix = contact !== undefined && contact.length > 0 ? ` (+${contact})` : '';
+  // The `@url:` marker is a policy-internal convention. It means
+  // nothing to a site, and shipping it in a user agent is noise.
+  const clean = contact !== undefined ? stripUrlMarker(contact) : '';
+  const suffix = clean.length > 0 ? ` (+${clean})` : '';
   return `BrowserVerifiedSkill/${VERSION}${suffix}`;
 }
 

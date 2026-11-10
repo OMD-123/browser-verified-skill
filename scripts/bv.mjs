@@ -205,7 +205,7 @@ function defaultPolicy() {
     rate: { maxRpsPerDomain: 1, jitterMs: [300, 1200] },
     compliance: {
       respectRobots: true,
-      userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
+      userAgentSuffix: "BrowserVerifiedSkill/1.0 (+https://your-site/contact)",
       captcha: "human_handoff",
       evalReadonly: false
     },
@@ -312,7 +312,7 @@ var init_policy = __esm({
       /** Respect robots.txt. */
       respectRobots: z.boolean().default(true),
       /** The honest user-agent suffix, including a contact URL. */
-      userAgentSuffix: z.string().default("BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)"),
+      userAgentSuffix: z.string().default("BrowserVerifiedSkill/1.0 (+https://your-site/contact)"),
       /** What to do when a challenge is detected. */
       captcha: z.enum(["human_handoff", "deny"]).default("human_handoff"),
       /** Allow `eval-readonly`. Off by default: it is the most powerful primitive. */
@@ -357,7 +357,7 @@ var init_policy = __esm({
       rate: RateSchema.default({ maxRpsPerDomain: 1, jitterMs: [300, 1200] }),
       compliance: ComplianceSchema.default({
         respectRobots: true,
-        userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)",
+        userAgentSuffix: "BrowserVerifiedSkill/1.0 (+https://your-site/contact)",
         captcha: "human_handoff",
         evalReadonly: false
       }),
@@ -745,125 +745,6 @@ var init_client = __esm({
   }
 });
 
-// src/actions/locate.ts
-function parseTarget(input) {
-  const trimmed = input.trim();
-  if (trimmed.length === 0) return {};
-  if (/^(?:f\d+)?e\d+$/.test(trimmed)) {
-    return { ref: trimmed };
-  }
-  if (/^[#.[]/.test(trimmed)) {
-    return { css: trimmed };
-  }
-  const descriptor = {};
-  const pattern = /(role|name|label|text|testid|css)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)/g;
-  let match;
-  let matched = false;
-  while ((match = pattern.exec(trimmed)) !== null) {
-    matched = true;
-    const key = match[1] ?? "";
-    const raw = match[2] ?? "";
-    const value = unquote(raw);
-    switch (key) {
-      case "role":
-        descriptor.role = value;
-        break;
-      case "name":
-        descriptor.name = value;
-        break;
-      case "label":
-        descriptor.label = value;
-        break;
-      case "text":
-        descriptor.text = value;
-        break;
-      case "testid":
-        descriptor.testId = value;
-        break;
-      case "css":
-        descriptor.css = value;
-        break;
-      default:
-        break;
-    }
-  }
-  if (matched) return descriptor;
-  return { text: trimmed };
-}
-function unquote(value) {
-  if (value.length >= 2) {
-    const first = value[0];
-    const last = value[value.length - 1];
-    if (first === '"' && last === '"' || first === "'" && last === "'") {
-      return value.slice(1, -1).replace(/\\(.)/g, "$1");
-    }
-  }
-  return value;
-}
-function strategyOrder(target) {
-  const order = [];
-  if (target.ref !== void 0) order.push("ref");
-  if (target.role !== void 0 && target.name !== void 0) order.push("role");
-  if (target.label !== void 0) order.push("label");
-  if (target.text !== void 0) order.push("text");
-  if (target.testId !== void 0) order.push("testid");
-  if (target.css !== void 0) order.push("css");
-  return order;
-}
-function locatorFor(page, strategy, target) {
-  switch (strategy) {
-    case "ref":
-      return target.ref !== void 0 ? page.getByRef(target.ref) : void 0;
-    case "role":
-      return target.role !== void 0 && target.name !== void 0 ? page.getByRole(target.role, {
-        name: target.name
-      }) : void 0;
-    case "label":
-      return target.label !== void 0 ? page.getByLabel(target.label) : void 0;
-    case "text":
-      return target.text !== void 0 ? page.getByText(target.text) : void 0;
-    case "testid":
-      return target.testId !== void 0 ? page.getByTestId(target.testId) : void 0;
-    case "css":
-      return target.css !== void 0 ? page.locator(target.css) : void 0;
-    case "fresh-snapshot":
-      return void 0;
-    default:
-      return void 0;
-  }
-}
-async function locate(page, target, options = {}) {
-  const attempted = [];
-  const failures = [];
-  const timeout = options.timeoutMs ?? 1e4;
-  for (const strategy of strategyOrder(target)) {
-    const locator = locatorFor(page, strategy, target);
-    if (locator === void 0) continue;
-    attempted.push(strategy);
-    try {
-      await locator.first().waitFor({ state: "attached", timeout });
-      const count = await locator.count();
-      if (count === 1) {
-        return { locator, strategy, attempted, failures };
-      }
-      if (count === 0) {
-        failures.push({ strategy, reason: "no element matched" });
-      } else {
-        failures.push({ strategy, reason: `matched ${count} elements (ambiguous)` });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message.split("\n")[0] ?? "unknown error" : String(err);
-      failures.push({ strategy, reason: message });
-    }
-  }
-  return { locator: void 0, strategy: void 0, attempted, failures };
-}
-var init_locate = __esm({
-  "src/actions/locate.ts"() {
-    "use strict";
-  }
-});
-
 // src/safety/classify.ts
 function matchesAny(patterns, text) {
   if (text === void 0 || text.length === 0) return false;
@@ -1193,6 +1074,173 @@ var init_evaluator = __esm({
     "use strict";
     init_classify();
     init_policy();
+  }
+});
+
+// src/safety/contact.ts
+function stripUrlMarker(value) {
+  let raw = value.trim();
+  if (raw.toLowerCase().startsWith(URL_MARKER)) {
+    raw = raw.slice(URL_MARKER.length).trim();
+  }
+  raw = raw.replace(/^`|`$/g, "").trim();
+  return raw;
+}
+function isPlaceholderContact(contact) {
+  if (contact === void 0) return true;
+  const stripped = stripUrlMarker(contact);
+  if (stripped.length === 0) return true;
+  const url = extractUrl(stripped);
+  if (url === void 0) return true;
+  return PLACEHOLDER_CONTACTS.has(url.toLowerCase());
+}
+function extractUrl(value) {
+  const match = /\(([^)]+)\)/.exec(value);
+  if (match !== null) {
+    return match[1]?.trim().replace(/^\+/, "").trim();
+  }
+  if (/^https?:\/\//i.test(value)) return value;
+  return void 0;
+}
+function honestContact(contact, ownedOrigins) {
+  if (isPlaceholderContact(contact)) return void 0;
+  const stripped = stripUrlMarker(contact);
+  const targetOrigin = originOf(stripped);
+  if (ownedOrigins.some((origin) => originOf(origin) === targetOrigin)) {
+    return stripped;
+  }
+  return stripped;
+}
+var PLACEHOLDER_CONTACTS;
+var init_contact = __esm({
+  "src/safety/contact.ts"() {
+    "use strict";
+    init_policy();
+    init_evaluator();
+    PLACEHOLDER_CONTACTS = /* @__PURE__ */ new Set([
+      "https://your-site/contact",
+      "http://your-site/contact",
+      "https://your-site.example/contact"
+    ]);
+  }
+});
+
+// src/actions/locate.ts
+function parseTarget(input) {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return {};
+  if (/^(?:f\d+)?e\d+$/.test(trimmed)) {
+    return { ref: trimmed };
+  }
+  if (/^[#.[]/.test(trimmed)) {
+    return { css: trimmed };
+  }
+  const descriptor = {};
+  const pattern = /(role|name|label|text|testid|css)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)/g;
+  let match;
+  let matched = false;
+  while ((match = pattern.exec(trimmed)) !== null) {
+    matched = true;
+    const key = match[1] ?? "";
+    const raw = match[2] ?? "";
+    const value = unquote(raw);
+    switch (key) {
+      case "role":
+        descriptor.role = value;
+        break;
+      case "name":
+        descriptor.name = value;
+        break;
+      case "label":
+        descriptor.label = value;
+        break;
+      case "text":
+        descriptor.text = value;
+        break;
+      case "testid":
+        descriptor.testId = value;
+        break;
+      case "css":
+        descriptor.css = value;
+        break;
+      default:
+        break;
+    }
+  }
+  if (matched) return descriptor;
+  return { text: trimmed };
+}
+function unquote(value) {
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if (first === '"' && last === '"' || first === "'" && last === "'") {
+      return value.slice(1, -1).replace(/\\(.)/g, "$1");
+    }
+  }
+  return value;
+}
+function strategyOrder(target) {
+  const order = [];
+  if (target.ref !== void 0) order.push("ref");
+  if (target.role !== void 0 && target.name !== void 0) order.push("role");
+  if (target.label !== void 0) order.push("label");
+  if (target.text !== void 0) order.push("text");
+  if (target.testId !== void 0) order.push("testid");
+  if (target.css !== void 0) order.push("css");
+  return order;
+}
+function locatorFor(page, strategy, target) {
+  switch (strategy) {
+    case "ref":
+      return target.ref !== void 0 ? page.getByRef(target.ref) : void 0;
+    case "role":
+      return target.role !== void 0 && target.name !== void 0 ? page.getByRole(target.role, {
+        name: target.name
+      }) : void 0;
+    case "label":
+      return target.label !== void 0 ? page.getByLabel(target.label) : void 0;
+    case "text":
+      return target.text !== void 0 ? page.getByText(target.text) : void 0;
+    case "testid":
+      return target.testId !== void 0 ? page.getByTestId(target.testId) : void 0;
+    case "css":
+      return target.css !== void 0 ? page.locator(target.css) : void 0;
+    case "fresh-snapshot":
+      return void 0;
+    default:
+      return void 0;
+  }
+}
+async function locate(page, target, options = {}) {
+  const attempted = [];
+  const failures = [];
+  const timeout = options.timeoutMs ?? 1e4;
+  for (const strategy of strategyOrder(target)) {
+    const locator = locatorFor(page, strategy, target);
+    if (locator === void 0) continue;
+    attempted.push(strategy);
+    try {
+      await locator.first().waitFor({ state: "attached", timeout });
+      const count = await locator.count();
+      if (count === 1) {
+        return { locator, strategy, attempted, failures };
+      }
+      if (count === 0) {
+        failures.push({ strategy, reason: "no element matched" });
+      } else {
+        failures.push({ strategy, reason: `matched ${count} elements (ambiguous)` });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message.split("\n")[0] ?? "unknown error" : String(err);
+      failures.push({ strategy, reason: message });
+    }
+  }
+  return { locator: void 0, strategy: void 0, attempted, failures };
+}
+var init_locate = __esm({
+  "src/actions/locate.ts"() {
+    "use strict";
   }
 });
 
@@ -4339,7 +4387,8 @@ function countAll(nodes) {
   return total;
 }
 function buildUserAgent(contact) {
-  const suffix = contact !== void 0 && contact.length > 0 ? ` (+${contact})` : "";
+  const clean = contact !== void 0 ? stripUrlMarker(contact) : "";
+  const suffix = clean.length > 0 ? ` (+${clean})` : "";
   return `BrowserVerifiedSkill/${VERSION}${suffix}`;
 }
 var BrowserSession;
@@ -4354,6 +4403,7 @@ var init_session = __esm({
     init_render();
     init_act();
     init_version();
+    init_contact();
     BrowserSession = class {
       store;
       userAgent;
@@ -6465,9 +6515,16 @@ async function runDaemonProcess(options) {
   const runId = options.runId ?? newRunId();
   const store = new RunStore(runId, options.cwd);
   await store.init();
-  const userAgent = buildUserAgent(options.contactUrl);
-  let session;
   const policy = await loadPolicy(options.cwd);
+  const contact = honestContact(options.contactUrl, policy.ownedOrigins);
+  const userAgent = buildUserAgent(contact);
+  if (options.contactUrl !== void 0 && contact === void 0) {
+    await store.audit({
+      type: "contact_rejected",
+      reason: isPlaceholderContact(options.contactUrl) ? "the contact URL is a placeholder" : "the contact URL is not on an owned origin"
+    });
+  }
+  let session;
   const planLock = new PlanLock();
   const approvals = new ApprovalStore();
   const scanner = new InjectionScanner();
@@ -6543,6 +6600,7 @@ var init_daemon_process = __esm({
     init_planlock();
     init_approvals();
     init_taint();
+    init_contact();
     init_evaluator();
     init_approver();
     init_terminal();
@@ -6890,6 +6948,7 @@ import { dirname as dirname5, resolve as resolve4 } from "path";
 init_exit();
 init_client();
 init_daemon_info();
+init_contact();
 init_paths();
 init_errors();
 function daemonEntry() {
@@ -6959,6 +7018,14 @@ function registerSession(program) {
     const global = globalOptions(cmd);
     try {
       await ensureBvDir(global.cwd);
+      if (options.contact !== void 0 && isPlaceholderContact(options.contact)) {
+        const message = `"${options.contact}" is a placeholder contact URL, not a contact. Pass a real one with --contact, or leave it out so the user agent has none.`;
+        emit(
+          cmd,
+          fail({ error: "placeholder_contact", contact: options.contact }, [message], EXIT.USAGE)
+        );
+        return;
+      }
       const existing = await readDaemonInfo(global.cwd);
       if (existing !== void 0 && isProcessAlive(existing.pid)) {
         emit(

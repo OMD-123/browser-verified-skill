@@ -96,9 +96,7 @@ export const ComplianceSchema = z
     /** Respect robots.txt. */
     respectRobots: z.boolean().default(true),
     /** The honest user-agent suffix, including a contact URL. */
-    userAgentSuffix: z
-      .string()
-      .default('BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)'),
+    userAgentSuffix: z.string().default('BrowserVerifiedSkill/1.0 (+https://your-site/contact)'),
     /** What to do when a challenge is detected. */
     captcha: z.enum(['human_handoff', 'deny']).default('human_handoff'),
     /** Allow `eval-readonly`. Off by default: it is the most powerful primitive. */
@@ -168,7 +166,7 @@ export const PolicySchema = z
     rate: RateSchema.default({ maxRpsPerDomain: 1, jitterMs: [300, 1200] }),
     compliance: ComplianceSchema.default({
       respectRobots: true,
-      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)',
+      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+https://your-site/contact)',
       captcha: 'human_handoff',
       evalReadonly: false,
     }),
@@ -200,7 +198,7 @@ export function defaultPolicy(): Policy {
     rate: { maxRpsPerDomain: 1, jitterMs: [300, 1200] },
     compliance: {
       respectRobots: true,
-      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)',
+      userAgentSuffix: 'BrowserVerifiedSkill/1.0 (+https://your-site/contact)',
       captcha: 'human_handoff',
       evalReadonly: false,
     },

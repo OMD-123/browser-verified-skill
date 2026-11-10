@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isPlaceholderContact } from '../../src/safety/contact.js';
 
 const exec = promisify(execFile);
 
@@ -315,7 +316,25 @@ describe('the published artifact', () => {
     expect(readme).toContain(`**${claims.length} claims**`);
   });
 
-  it("does not run a dev-only fix on an end user's install", async () => {
+  it('has no placeholder contact in the shipped user agent', async () => {
+    // The gap: the default user agent contained a literal `@url:` marker
+    // and a placeholder URL. The marker is internal; the placeholder
+    // goes nowhere. A site owner who reads the agent and tries to
+    // contact it reaches a domain that is not theirs.
+    const policy = await readFile(join(ROOT, 'policies', 'default.yaml'), 'utf8');
+    const suffix = policy.match(/userAgentSuffix:\s*"(.+)"/)?.[1]?.trim() ?? '';
+
+    expect(suffix).not.toContain('@url:');
+    // The placeholder may be in the policy as an example, but it must
+    // be one the session recognises as a placeholder.
+    expect(isPlaceholderContact(suffix)).toBe(true);
+
+    // And the code that reads it knows the same placeholders.
+    const code = await readFile(join(ROOT, 'src', 'safety', 'contact.ts'), 'utf8');
+    expect(code).toContain('your-site/contact');
+  });
+
+  it('does not run a dev-only fix on an end user', async () => {
     // The gap: the native-binding script was a `postinstall`, so every
     // end user's `npm install` ran a fix that only matters for running
     // the tests. It belongs in CI, not in an install.

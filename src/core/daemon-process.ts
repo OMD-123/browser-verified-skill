@@ -23,6 +23,7 @@ import { ACTION_CLASSES, loadPolicy, type Policy } from '../safety/policy.js';
 import { PlanLock, PlanSchema, type Plan } from '../safety/planlock.js';
 import { hashAction, ApprovalStore } from '../safety/approvals.js';
 import { taint } from '../safety/taint.js';
+import { honestContact, isPlaceholderContact } from '../safety/contact.js';
 import { originOf } from '../safety/evaluator.js';
 import { ApprovalChannel, ApproverCredential } from '../safety/approver.js';
 import { ControllingTerminal, approvalPrompt } from '../safety/terminal.js';
@@ -1219,13 +1220,29 @@ export async function runDaemonProcess(options: DaemonProcessOptions): Promise<v
   const store = new RunStore(runId, options.cwd);
   await store.init();
 
-  const userAgent = buildUserAgent(options.contactUrl);
-  let session: BrowserSession | undefined;
-
   // The safety layer. The policy is loaded once at start-up; the plan-lock
   // and the approval store live for the life of the daemon, so an approval
   // issued in one CLI call is usable in the next.
   const policy: Policy = await loadPolicy(options.cwd);
+
+  // The contact URL in the user agent. It is used only if it is REAL:
+  // the operator gave it with `--contact`, or it is on an origin the
+  // operator owns. A placeholder contact is not a contact -- it goes
+  // nowhere, and an "honest" user agent that nobody can act on is not
+  // honest.
+  const contact = honestContact(options.contactUrl, policy.ownedOrigins);
+  const userAgent = buildUserAgent(contact);
+
+  if (options.contactUrl !== undefined && contact === undefined) {
+    await store.audit({
+      type: 'contact_rejected',
+      reason: isPlaceholderContact(options.contactUrl)
+        ? 'the contact URL is a placeholder'
+        : 'the contact URL is not on an owned origin',
+    });
+  }
+
+  let session: BrowserSession | undefined;
   const planLock = new PlanLock();
   const approvals = new ApprovalStore();
   const scanner = new InjectionScanner();

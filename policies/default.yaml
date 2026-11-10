@@ -50,7 +50,12 @@ rate:
 compliance:
   respectRobots: true
   # Honest user agent. Keep the contact URL accurate so site owners can reach you.
-  userAgentSuffix: "BrowserVerifiedSkill/1.0 (+@url:`https://your-site/contact`)"
+  #
+  # The default is a PLACEHOLDER. A session started with it carries no
+  # contact at all, because a contact that goes nowhere is not an
+  # honest contact. Set `ownedOrigins` to your own site, or pass
+  # `--contact` when starting a session.
+  userAgentSuffix: "BrowserVerifiedSkill/1.0 (+https://your-site/contact)"
   captcha: human_handoff
   # eval-readonly is off by default; enabling it allows DOM reads only.
   evalReadonly: false
