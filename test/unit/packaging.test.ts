@@ -423,13 +423,24 @@ describe('the published artifact', () => {
     const generated = await renderPage(join(ROOT, 'docs', 'index.html'));
     const onDisk = await readFile(join(ROOT, 'docs', 'index.html'), 'utf8');
 
-    expect(generated, 'the generator and the file on disk disagree -- regenerate it').toBe(onDisk);
+    // The line endings are normalised before comparing. Git checks the
+    // file out with CRLF on Windows, so a byte-for-byte comparison
+    // fails there and passes on Linux -- which is the worst kind of
+    // test failure.
+    const normalise = (text: string): string => text.replace(/\r\n/g, '\n');
 
-    // And it is already in Prettier's form.
+    expect(
+      normalise(generated),
+      'the generator and the file on disk disagree -- regenerate it',
+    ).toBe(normalise(onDisk));
+
+    // And it is already in Prettier's form. The line endings are
+    // normalised first, because Git checks the file out with CRLF on
+    // Windows and Prettier's endOfLine setting is 'lf'.
     const { check, resolveConfig } = await import('prettier');
     const filepath = join(ROOT, 'docs', 'index.html');
     const config = await resolveConfig(filepath);
-    const result = await check(onDisk, {
+    const result = await check(normalise(onDisk), {
       ...(config ?? {}),
       filepath,
       parser: 'html',
