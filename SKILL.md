@@ -15,6 +15,19 @@ description: >-
 `bv` is a browser driver where every action is checked and every run leaves
 evidence behind.
 
+## What you need
+
+| Requirement                      | Why                                           |
+| -------------------------------- | --------------------------------------------- |
+| **Node.js 18+**                  | the CLI is a Node program                     |
+| **npm**                          | to install the CLI and Playwright             |
+| **browser-verified-skill** (npm) | the `bv` CLI itself                           |
+| **Playwright**                   | a real dependency of that package             |
+| **Chromium**                     | Playwright's browser, downloaded on first use |
+
+Everything runs locally on the machine that runs the agent. Nothing is
+uploaded to a third-party service.
+
 ## Before anything else: is `bv` installed?
 
 Check first, install only if it is missing:
@@ -23,8 +36,13 @@ Check first, install only if it is missing:
 bv --version || npm install -g browser-verified-skill
 ```
 
-The agent needs a real browser too. If a command fails with a missing
-browser, run `bv doctor --install` once.
+That install pulls **Playwright** as a real dependency, and Playwright
+needs its own Chromium build. If a command fails with a missing browser,
+run this once:
+
+```bash
+bv doctor --install
+```
 
 ## The one rule
 
