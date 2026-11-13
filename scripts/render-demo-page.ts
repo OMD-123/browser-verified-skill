@@ -15,6 +15,6 @@ import { pagesRoot, renderPage } from '../src/mcp/demo-page.js';
 
 const target = resolve(pagesRoot(), 'index.html');
 await mkdir(dirname(target), { recursive: true });
-await writeFile(target, renderPage(), 'utf8');
+await writeFile(target, await renderPage(), 'utf8');
 
 console.log(`wrote ${target}`);

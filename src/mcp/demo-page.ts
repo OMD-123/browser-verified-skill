@@ -16,6 +16,8 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { formatHtml } from './format-html.js';
+
 /** The folder the page is published from. */
 export function pagesRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -56,7 +58,8 @@ export const PAGE_VIDEOS = [
  * a browser plays an mp4 from the same origin without a download
  * dialog.
  */
-export function renderPage(): string {
+export async function renderPage(filepath?: string): Promise<string> {
+  const target = filepath ?? resolve(pagesRoot(), 'index.html');
   const sections = PAGE_VIDEOS.map((video) => {
     // A poster is optional. Without one the player shows the first
     // frame, which is still better than nothing.
@@ -77,7 +80,8 @@ export function renderPage(): string {
     </section>`;
   }).join('\n');
 
-  return `<!doctype html>
+  return formatHtml(
+    `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -140,5 +144,7 @@ ${sections}
     </main>
   </body>
 </html>
-`;
+`,
+    target,
+  );
 }

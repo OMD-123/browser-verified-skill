@@ -414,6 +414,29 @@ describe('the published artifact', () => {
     expect(toolText(null)).toBe('null');
   });
 
+  it('generates a demo page that is already formatted', async () => {
+    // The page is generated, and CI runs `prettier --check`. A
+    // generated file that is not formatted fails the build, so the
+    // generator formats its own output.
+    const { renderPage } = await import('../../src/mcp/demo-page.js');
+
+    const generated = await renderPage(join(ROOT, 'docs', 'index.html'));
+    const onDisk = await readFile(join(ROOT, 'docs', 'index.html'), 'utf8');
+
+    expect(generated, 'the generator and the file on disk disagree -- regenerate it').toBe(onDisk);
+
+    // And it is already in Prettier's form.
+    const { check, resolveConfig } = await import('prettier');
+    const filepath = join(ROOT, 'docs', 'index.html');
+    const config = await resolveConfig(filepath);
+    const result = await check(onDisk, {
+      ...(config ?? {}),
+      filepath,
+      parser: 'html',
+    });
+    expect(result, 'the generated page is not Prettier-formatted').toBe(true);
+  });
+
   it('finds the docs folder from the bundled CLI as well as the source', async () => {
     // The bundled CLI lives in scripts/bv.mjs and the source lives in
     // src/mcp/, so the depth differs. Both are tried, so a published
@@ -428,7 +451,7 @@ describe('the published artifact', () => {
   it('has a demo page that names both videos and links to the repo', async () => {
     const { renderPage, PAGE_VIDEOS } = await import('../../src/mcp/demo-page.js');
 
-    const page = renderPage();
+    const page = await renderPage();
 
     // Every video gets a section.
     for (const video of PAGE_VIDEOS) {
