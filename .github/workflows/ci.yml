@@ -82,6 +82,12 @@ jobs:
       - name: Acceptance claims
         run: npm run acceptance
 
+      - name: Build the demo page
+        # GitHub will not play a video in a README -- it strips the
+        # <video> tag. The page is where the videos live, and GitHub
+        # Pages publishes docs/ as it.
+        run: npm run demo:page
+
   macos:
     name: best-effort (macOS)
     runs-on: macos-latest

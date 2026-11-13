@@ -55,7 +55,7 @@ Two demos, both real runs against a local fixture site. Nothing is mocked.
 
 |               | The tool                              | The tool being used by an agent                                  |
 | ------------- | ------------------------------------- | ---------------------------------------------------------------- |
-| Video         | [demo.mp4](docs/demo.mp4) (2:33)      | [agent-demo.mp4](docs/agent-demo.mp4) (2:14)                     |
+| Video         | [demo.mp4](docs/demo.mp4) (2:33)      | [agent-demo.mp4](docs/agent-demo.mp4) (1:35)                     |
 | What it shows | `bv` driven by a script that knows it | **Hermes, given only a link**, installing the skill and using it |
 | Run it        | `npm run demo`                        | `bash scripts/demo-agent-live.sh`                                |
 
@@ -65,16 +65,24 @@ fills a form, gets a human's approval for the submit, and then meets a
 prompt-injection payload — and **does not work around the refusal**.
 
 <p align="center">
-  <video src="docs/demo.mp4" poster="docs/demo-poster.jpg" width="820" controls preload="metadata">
-    <a href="docs/demo.mp4">Watch the tool demo (2:33)</a>
-  </video>
+  <img src="docs/demo-loop.gif" alt="A real run of the browser-verified-skill CLI." width="820" />
 </p>
 
 <p align="center">
-  <img src="docs/agent-demo.mp4" alt="the agent demo" width="820" />
+  <a href="https://omd-123.github.io/browser-verified-skill/demo.mp4">
+    <img src="docs/demo-poster.jpg" alt="Click to watch the full 2 minute 33 second demo." width="820" />
+  </a>
 </p>
 
-**[Watch the agent demo (2:14)](docs/agent-demo.mp4)** — or run it yourself:
+[![the agent demo](docs/agent-demo-poster.jpg)](https://omd-123.github.io/browser-verified-skill/agent-demo.mp4)
+
+<p align="center">
+  <a href="https://omd-123.github.io/browser-verified-skill/agent-demo.mp4">
+    <img src="docs/agent-demo-poster.jpg" alt="Hermes, given a link to a skill, installs it and uses it. Click to watch the 1 minute 35 second demo." width="820" />
+  </a>
+</p>
+
+**[Watch the agent demo (1:35)](docs/agent-demo.mp4)** — or run it yourself:
 
 ```bash
 bv demo          # the same run, as a document an agent can read

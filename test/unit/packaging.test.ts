@@ -347,29 +347,64 @@ describe('the published artifact', () => {
     expect(demo).toContain('verify');
   });
 
-  it('has video players in the README that point at real files', async () => {
-    // GitHub renders a <video> tag. If the src or the poster is missing,
-    // the README shows a black box and nobody can tell it is broken.
+  it('has a video poster in the README that points at a playable file', async () => {
+    // GitHub does NOT render a <video> tag in a README. It strips it and
+    // renders an empty paragraph. Nor does the image syntax work: an
+    // mp4 through ![](...) is a broken image.
+    //
+    // So the README shows a POSTER IMAGE that links to a playable mp4.
+    // The poster is served from the repository; the video is served
+    // from GitHub Pages, which serves mp4 as video/mp4 with range
+    // support, so a browser can actually play it.
     const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
 
-    const videos = [...readme.matchAll(/<video\s+src="([^"]+)"/g)].map((m) => m[1] ?? '');
-    expect(videos.length, 'the README has no video player').toBeGreaterThan(0);
+    // No <video> tag: GitHub would strip it.
+    expect(readme, 'a <video> tag is stripped by GitHub').not.toMatch(/<video\b/);
 
-    for (const src of videos) {
-      expect(existsSync(join(ROOT, src)), `${src} is referenced but does not exist`).toBe(true);
-    }
-
-    const posters = [...readme.matchAll(/poster="([^"]+)"/g)].map((m) => m[1] ?? '');
-    expect(posters.length, 'a video has no poster').toBe(videos.length);
+    // The poster images exist.
+    const posters = [...readme.matchAll(/<img\s+src="(docs\/[^"]+\.jpg)"/g)].map((m) => m[1] ?? '');
+    expect(posters.length, 'the README has no video poster').toBeGreaterThan(0);
 
     for (const poster of posters) {
       expect(existsSync(join(ROOT, poster)), `${poster} is missing`).toBe(true);
     }
 
-    // Every video has a fallback link, for a reader on a client that
-    // does not render video.
-    expect(readme).toContain('<a href="docs/agent-demo.mp4">');
-    expect(readme).toContain('<a href="docs/demo.mp4">');
+    // Each poster links to a playable URL, not to the repository file.
+    // The repository file is served as octet-stream, so it downloads.
+    const links = [...readme.matchAll(/<a href="(https?:\/\/[^"]+\.mp4)"/g)].map((m) => m[1] ?? '');
+    expect(links.length, 'a poster does not link to a video').toBeGreaterThan(0);
+
+    for (const link of links) {
+      expect(link, 'the video link points at the repository file, which downloads').toMatch(
+        /github\.io/,
+      );
+    }
+  });
+
+  it('has a demo page that actually plays the videos', async () => {
+    // A README cannot play a video -- GitHub strips the <video> tag. A
+    // web page can, and GitHub Pages serves an mp4 as video/mp4 with
+    // range support. So the page is the place the videos live.
+    const page = await readFile(join(ROOT, 'docs', 'index.html'), 'utf8');
+
+    const videos = [...page.matchAll(/<source src="([^"]+)" type="video\/mp4"/g)].map(
+      (m) => m[1] ?? '',
+    );
+    expect(videos.length, 'the page has no playable video').toBe(2);
+
+    for (const video of videos) {
+      expect(existsSync(join(ROOT, 'docs', video)), `${video} is missing`).toBe(true);
+    }
+
+    // Each video has a poster, so it shows something before it plays.
+    const posters = [...page.matchAll(/poster="([^"]+)"/g)].map((m) => m[1] ?? '');
+    expect(posters.length).toBe(videos.length);
+    for (const poster of posters) {
+      expect(existsSync(join(ROOT, 'docs', poster)), `${poster} is missing`).toBe(true);
+    }
+
+    // And a fallback link, for a browser that cannot play the codec.
+    expect(page).toContain('Download it');
   });
 
   it('has an agent demo where the agent refuses to work around a refusal', async () => {
