@@ -1,6 +1,32 @@
+<div align="center">
+
 # browser-verified-skill
 
-**Explore once with an AI agent, prove the result with evidence, compile it to a plain Playwright script, replay it for free, and heal only the steps that break.**
+**Explore once with an AI agent. Prove the result with evidence. Compile it to a plain
+Playwright script. Replay it for free.**
+
+<p>
+  <a href="https://github.com/OMD-123/browser-verified-skill/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/OMD-123/browser-verified-skill/actions/workflows/ci.yml/badge.svg" height="20">
+  </a>
+  <a href="https://www.npmjs.com/package/browser-verified-skill">
+    <img alt="npm version" src="https://img.shields.io/npm/v/browser-verified-skill.svg" height="20">
+  </a>
+  <a href="LICENSE">
+    <img alt="license" src="https://img.shields.io/badge/license-MIT-blue.svg" height="20">
+  </a>
+  <a href="https://nodejs.org">
+    <img alt="node" src="https://img.shields.io/badge/node-%3E%3D20-5FA04E.svg" height="20">
+  </a>
+  <a href="https://www.typescriptlang.org">
+    <img alt="typescript" src="https://img.shields.io/badge/typescript-5.9-blue.svg" height="20">
+  </a>
+  <a href="https://m8ven.ai/mcp/omd-123/browser-verified-skill">
+    <img alt="M8ven score" src="https://m8ven.ai/badge/mcp/omd-123/browser-verified-skill" height="20">
+  </a>
+</p>
+
+</div>
 
 `browser-verified-skill` (CLI: `bv`) is an open-source **Agent Skill** for browser
 automation. Drop it into an agent — Claude Code, Hermes, or anything that speaks MCP or
@@ -11,15 +37,9 @@ script that replays for free.
 It exists for the case where an agent drives a real browser and you need the result to be
 **provable**, **auditable** and **reproducible** — not a transcript that claims it worked.
 
-It is **not** a stealth tool. There is no fingerprint spoofing, no CAPTCHA solving, no
-proxy rotation and no bot-detection evasion. The user agent is honest, CAPTCHA and login
-walls trigger a human handoff, and `robots.txt` is respected.
-
-[![CI](https://github.com/OMD-123/browser-verified-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/OMD-123/browser-verified-skill/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/browser-verified-skill.svg)](https://www.npmjs.com/package/browser-verified-skill)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![node](https://img.shields.io/badge/node-%3E%3D20-5FA04E.svg)](https://nodejs.org)
-[![typescript](https://img.shields.io/badge/typescript-5.9-blue.svg)](https://www.typescriptlang.org)
+> **It is not a stealth tool.** There is no fingerprint spoofing, no CAPTCHA solving, no
+> proxy rotation and no bot-detection evasion. The user agent is honest, CAPTCHA and login
+> walls trigger a human handoff, and `robots.txt` is respected.
 
 ---
 
@@ -51,56 +71,42 @@ walls trigger a human handoff, and `robots.txt` is respected.
 
 ## The demo
 
-Two demos, both real runs against a local fixture site. Nothing is mocked.
+Two real runs against a local fixture site. Nothing is mocked, and every refusal in
+them is the tool's own.
 
-|               | The tool                              | The tool being used by an agent                                  |
-| ------------- | ------------------------------------- | ---------------------------------------------------------------- |
-| Video         | [demo.mp4](docs/demo.mp4) (2:33)      | [agent-demo.mp4](docs/agent-demo.mp4) (1:35)                     |
-| What it shows | `bv` driven by a script that knows it | **Hermes, given only a link**, installing the skill and using it |
-| Run it        | `npm run demo`                        | `bash scripts/demo-agent-live.sh`                                |
-
-The agent demo is the one that answers "can I use this?". Hermes is
-handed a repo URL and a task. It installs the skill, reads the docs,
-fills a form, gets a human's approval for the submit, and then meets a
-prompt-injection payload — and **does not work around the refusal**.
-
-<p align="center">
-  <img src="docs/demo-loop.gif" alt="A real run of the browser-verified-skill CLI." width="820" />
-</p>
-
-<p align="center">
+<div align="center">
   <a href="https://omd-123.github.io/browser-verified-skill/demo.mp4">
-    <img src="docs/demo-poster.jpg" alt="Click to watch the full 2 minute 33 second demo." width="820" />
+    <img src="docs/demo-loop.gif" alt="A real run of the CLI: the hidden payload shows up in the snapshot, and acting on it is refused with exit 5." width="820" />
   </a>
-</p>
-
-[![the agent demo](docs/agent-demo-poster.jpg)](https://omd-123.github.io/browser-verified-skill/agent-demo.mp4)
+</div>
 
 <p align="center">
-  <a href="https://omd-123.github.io/browser-verified-skill/agent-demo.mp4">
-    <img src="docs/agent-demo-poster.jpg" alt="Hermes, given a link to a skill, installs it and uses it. Click to watch the 1 minute 35 second demo." width="820" />
-  </a>
+  <a href="https://omd-123.github.io/browser-verified-skill/agent-demo.mp4"><b>▶ Watch the agent demo — 1:35</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://omd-123.github.io/browser-verified-skill/demo.mp4"><b>▶ Watch the tool demo — 2:33</b></a>
+  &nbsp;·&nbsp;
+  <a href="docs/DEMO.md">What each step shows</a>
 </p>
 
-**[Watch the agent demo (1:35)](docs/agent-demo.mp4)** — or run it yourself:
+The **agent demo** is the one that answers _"can I use this?"_. Hermes is handed a
+repo URL and a task. It installs the skill, reads the docs, fills a form, gets a
+human's approval for the submit, and then meets a prompt-injection payload — and
+**does not work around the refusal**.
+
+| What happened                                     | Exit | What it means                           |
+| ------------------------------------------------- | ---- | --------------------------------------- |
+| A page carried an **invisible** injection payload | 5    | Refused — and it **cannot be approved** |
+| The agent tried to approve its own action         | 403  | A separate credential it never reads    |
+| A value was **read out of the page**              | 4    | Tainted, not trusted                    |
+| A submit needed a human                           | 4    | Approved out of band, then retried      |
+| The run was checked against the live page         | 0    | **Verified**, not claimed               |
+
+Run either one yourself:
 
 ```bash
-bv demo          # the same run, as a document an agent can read
-npm run demo     # the same run, as a video
+bv demo          # the run as a document an agent can read
+npm run demo     # the run as a video
 ```
-
-It shows the refusals, because the refusals are the product:
-
-- a page carries an **invisible prompt-injection payload**; acting on it
-  is refused with **exit 5**, and it **cannot be approved away**
-- the **agent cannot approve its own action** — a separate credential, in
-  a file the agent's process never reads
-- a value **read out of the page is tainted**, not trusted
-- a submit needs a human, the human says yes, and the run continues
-- the run is **verified against the live page**, then **compiled into a
-  plain Playwright script** that runs in CI
-
-See [docs/DEMO.md](docs/DEMO.md) for what each step shows.
 
 ## What problem this solves
 

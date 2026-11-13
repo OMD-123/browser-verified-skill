@@ -48,7 +48,24 @@ export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_INVALID_PARAMS = -32602;
 export const RPC_INTERNAL = -32603;
 
-/** An MCP tool. */
+/**
+ * An MCP tool.
+ *
+ * ## The annotations
+ *
+ * MCP lets a tool declare four hints about itself, so a host can warn
+ * a user before invoking it:
+ *
+ *   - `readOnlyHint`      the tool does not change anything
+ *   - `destructiveHint`   the tool may destroy something
+ *   - `idempotentHint`    calling it twice is the same as calling it once
+ *   - `openWorldHint`     it touches something outside this system
+ *
+ * All four are declared on every tool, as explicit booleans. A missing
+ * hint is worse than a wrong one: a host that reads "unknown" has to
+ * assume the worst, and OpenAI's directory rejects a tool where any of
+ * the four is missing.
+ */
 export interface McpTool {
   /** The tool's name. */
   name: string;
@@ -61,6 +78,14 @@ export interface McpTool {
     required?: string[];
     additionalProperties?: boolean;
   };
+  /** The tool does not change anything. */
+  readonly readOnlyHint?: boolean;
+  /** The tool may destroy something. */
+  readonly destructiveHint?: boolean;
+  /** Calling it twice is the same as calling it once. */
+  readonly idempotentHint?: boolean;
+  /** The tool touches something outside this system. */
+  readonly openWorldHint?: boolean;
 }
 
 /** The result of a tool call. */
@@ -241,9 +266,21 @@ export function toolText(result: unknown): string {
   try {
     return JSON.stringify(result, null, 2) ?? '(no result)';
   } catch {
-    // A value that cannot be serialised is described, not stringified: an
-    // object must never become "[object Object]".
-    return Object.prototype.toString.call(result);
+    // A value that cannot be serialised is described, not stringified.
+    //
+    // `Object.prototype.toString.call(x)` is NOT enough here: for a
+    // plain object it returns "[object Object]", which is exactly the
+    // thing this is supposed to avoid. So the type is named instead,
+    // with the keys, so the reader can tell what they are looking at.
+    const kind = Object.prototype.toString.call(result);
+    const named = /\[object ([A-Za-z]+)\]/.exec(kind)?.[1];
+
+    if (named === 'Object' && typeof result === 'object' && result !== null) {
+      const keys = Object.keys(result).slice(0, 8);
+      return `an object that cannot be serialised (keys: ${keys.join(', ')})`;
+    }
+
+    return `a value that cannot be serialised (${named ?? 'unknown type'})`;
   }
 }
 
@@ -282,6 +319,12 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       },
       additionalProperties: false,
     },
+    // It reads the page. It does not change it.
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    // It reads a page on the open web.
+    openWorldHint: true,
   },
   {
     name: 'act',
@@ -320,6 +363,16 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       required: ['kind', 'target'],
       additionalProperties: false,
     },
+    // It changes the page: it clicks, types, submits.
+    readOnlyHint: false,
+    // A click can destroy something -- it can confirm a deletion, or
+    // place an order.
+    destructiveHint: true,
+    // Clicking twice is not the same as clicking once, so it is not
+    // idempotent.
+    idempotentHint: false,
+    // It acts on a page on the open web.
+    openWorldHint: true,
   },
   {
     name: 'approve',
@@ -332,6 +385,15 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       required: ['actionId'],
       additionalProperties: false,
     },
+    // It issues a token. It does not act on the page itself.
+    readOnlyHint: false,
+    // It does not destroy anything.
+    destructiveHint: false,
+    // A token is single-use, so a second call does the same thing: it
+    // issues another token for the same action.
+    idempotentHint: true,
+    // It acts on the local daemon, not the open web.
+    openWorldHint: false,
   },
   {
     name: 'verify',
@@ -351,6 +413,11 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       required: ['condition'],
       additionalProperties: false,
     },
+    // It reads the page and checks a condition.
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
   },
   {
     name: 'extract',
@@ -365,6 +432,11 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       required: ['schema'],
       additionalProperties: false,
     },
+    // It reads the page and returns values.
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
   },
   {
     name: 'compile',
@@ -377,6 +449,13 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       required: ['runId'],
       additionalProperties: false,
     },
+    // It reads a recorded run and writes a script.
+    readOnlyHint: false,
+    destructiveHint: false,
+    // Compiling the same run twice gives the same script.
+    idempotentHint: true,
+    // It works on local run data.
+    openWorldHint: false,
   },
   {
     name: 'replay',
@@ -397,5 +476,15 @@ export const BROWSER_TOOLS: readonly McpTool[] = [
       required: ['runId'],
       additionalProperties: false,
     },
+    // It drives the browser again, so it changes the page.
+    readOnlyHint: false,
+    // A replayed click can destroy something, exactly as the original
+    // did.
+    destructiveHint: true,
+    // A replay is deterministic, but it is not idempotent: running it
+    // twice performs the actions twice.
+    idempotentHint: false,
+    // It acts on a page on the open web.
+    openWorldHint: true,
   },
 ];

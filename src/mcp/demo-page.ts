@@ -58,7 +58,8 @@ export const PAGE_VIDEOS = [
  */
 export function renderPage(): string {
   const sections = PAGE_VIDEOS.map((video) => {
-    const exists = existsSync(resolve(pagesRoot(), video.file));
+    // A poster is optional. Without one the player shows the first
+    // frame, which is still better than nothing.
     const poster = existsSync(resolve(pagesRoot(), video.poster))
       ? ` poster="${video.poster}"`
       : '';

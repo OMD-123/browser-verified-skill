@@ -2002,7 +2002,13 @@ function toolText(result) {
   try {
     return JSON.stringify(result, null, 2) ?? "(no result)";
   } catch {
-    return Object.prototype.toString.call(result);
+    const kind = Object.prototype.toString.call(result);
+    const named = /\[object ([A-Za-z]+)\]/.exec(kind)?.[1];
+    if (named === "Object" && typeof result === "object" && result !== null) {
+      const keys = Object.keys(result).slice(0, 8);
+      return `an object that cannot be serialised (keys: ${keys.join(", ")})`;
+    }
+    return `a value that cannot be serialised (${named ?? "unknown type"})`;
   }
 }
 function toolResult(result, isError = false) {
@@ -2148,7 +2154,13 @@ var init_server = __esm({
             maxTokens: { type: "number", description: "the token budget for the tree" }
           },
           additionalProperties: false
-        }
+        },
+        // It reads the page. It does not change it.
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        // It reads a page on the open web.
+        openWorldHint: true
       },
       {
         name: "act",
@@ -2182,7 +2194,17 @@ var init_server = __esm({
           },
           required: ["kind", "target"],
           additionalProperties: false
-        }
+        },
+        // It changes the page: it clicks, types, submits.
+        readOnlyHint: false,
+        // A click can destroy something -- it can confirm a deletion, or
+        // place an order.
+        destructiveHint: true,
+        // Clicking twice is not the same as clicking once, so it is not
+        // idempotent.
+        idempotentHint: false,
+        // It acts on a page on the open web.
+        openWorldHint: true
       },
       {
         name: "approve",
@@ -2192,7 +2214,16 @@ var init_server = __esm({
           properties: { actionId: { type: "string", description: "the approval id from the refusal" } },
           required: ["actionId"],
           additionalProperties: false
-        }
+        },
+        // It issues a token. It does not act on the page itself.
+        readOnlyHint: false,
+        // It does not destroy anything.
+        destructiveHint: false,
+        // A token is single-use, so a second call does the same thing: it
+        // issues another token for the same action.
+        idempotentHint: true,
+        // It acts on the local daemon, not the open web.
+        openWorldHint: false
       },
       {
         name: "verify",
@@ -2207,7 +2238,12 @@ var init_server = __esm({
           },
           required: ["condition"],
           additionalProperties: false
-        }
+        },
+        // It reads the page and checks a condition.
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
       },
       {
         name: "extract",
@@ -2219,7 +2255,12 @@ var init_server = __esm({
           },
           required: ["schema"],
           additionalProperties: false
-        }
+        },
+        // It reads the page and returns values.
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
       },
       {
         name: "compile",
@@ -2229,7 +2270,14 @@ var init_server = __esm({
           properties: { runId: { type: "string", description: "the run to compile" } },
           required: ["runId"],
           additionalProperties: false
-        }
+        },
+        // It reads a recorded run and writes a script.
+        readOnlyHint: false,
+        destructiveHint: false,
+        // Compiling the same run twice gives the same script.
+        idempotentHint: true,
+        // It works on local run data.
+        openWorldHint: false
       },
       {
         name: "replay",
@@ -2247,7 +2295,17 @@ var init_server = __esm({
           },
           required: ["runId"],
           additionalProperties: false
-        }
+        },
+        // It drives the browser again, so it changes the page.
+        readOnlyHint: false,
+        // A replayed click can destroy something, exactly as the original
+        // did.
+        destructiveHint: true,
+        // A replay is deterministic, but it is not idempotent: running it
+        // twice performs the actions twice.
+        idempotentHint: false,
+        // It acts on a page on the open web.
+        openWorldHint: true
       }
     ];
   }

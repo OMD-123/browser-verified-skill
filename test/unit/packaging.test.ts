@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -361,12 +361,23 @@ describe('the published artifact', () => {
     // No <video> tag: GitHub would strip it.
     expect(readme, 'a <video> tag is stripped by GitHub').not.toMatch(/<video\b/);
 
-    // The poster images exist.
-    const posters = [...readme.matchAll(/<img\s+src="(docs\/[^"]+\.jpg)"/g)].map((m) => m[1] ?? '');
-    expect(posters.length, 'the README has no video poster').toBeGreaterThan(0);
+    // The README shows a GIF, which GitHub renders inline. It has to
+    // be a real file.
+    const gifs = [...readme.matchAll(/<img\s+src="(docs\/[^"]+\.gif)"/g)].map((m) => m[1] ?? '');
+    expect(gifs.length, 'the README has no demo gif').toBeGreaterThan(0);
 
-    for (const poster of posters) {
-      expect(existsSync(join(ROOT, poster)), `${poster} is missing`).toBe(true);
+    for (const gif of gifs) {
+      expect(existsSync(join(ROOT, gif)), `${gif} is missing`).toBe(true);
+    }
+
+    // A GIF that is too big is a GIF that does not get looked at, and
+    // it makes the repository clone slow for everyone.
+    for (const gif of gifs) {
+      const size = statSync(join(ROOT, gif)).size;
+      expect(
+        size,
+        `${gif} is ${Math.round(size / 1024)} KiB, which is too big for a README`,
+      ).toBeLessThan(1_500_000);
     }
 
     // Each poster links to a playable URL, not to the repository file.
@@ -379,6 +390,100 @@ describe('the published artifact', () => {
         /github\.io/,
       );
     }
+  });
+
+  it('describes an unserialisable tool result instead of stringifying it badly', async () => {
+    // An object that cannot be serialised must never become
+    // "[object Object]". A circular reference is the case that matters.
+    const { toolText } = await import('../../src/mcp/server.js');
+
+    const circular: Record<string, unknown> = { name: 'loop' };
+    circular['self'] = circular;
+
+    const described = toolText(circular);
+    expect(described).not.toBe('[object Object]');
+    expect(described).toContain('cannot be serialised');
+    // The keys are named, so the reader can tell what they are looking at.
+    expect(described).toContain('self');
+
+    // The simple cases.
+    expect(toolText(undefined)).toBe('(no result)');
+    expect(toolText('plain')).toBe('plain');
+    expect(toolText(42)).toBe('42');
+    expect(toolText(true)).toBe('true');
+    expect(toolText(null)).toBe('null');
+  });
+
+  it('finds the docs folder from the bundled CLI as well as the source', async () => {
+    // The bundled CLI lives in scripts/bv.mjs and the source lives in
+    // src/mcp/, so the depth differs. Both are tried, so a published
+    // package still finds its videos.
+    const { pagesRoot } = await import('../../src/mcp/demo-page.js');
+
+    const root = pagesRoot();
+    expect(existsSync(join(root, 'demo.mp4'))).toBe(true);
+    expect(existsSync(join(root, 'agent-demo.mp4'))).toBe(true);
+  });
+
+  it('has a demo page that names both videos and links to the repo', async () => {
+    const { renderPage, PAGE_VIDEOS } = await import('../../src/mcp/demo-page.js');
+
+    const page = renderPage();
+
+    // Every video gets a section.
+    for (const video of PAGE_VIDEOS) {
+      expect(page).toContain(video.file);
+      expect(page).toContain(video.title);
+    }
+
+    // It is a real HTML page, with a real player in it.
+    expect(page).toContain('<video');
+    expect(page).toContain('type="video/mp4"');
+    expect(page).toContain('controls');
+
+    // And it says where the repository is.
+    expect(page).toContain('github.com/OMD-123/browser-verified-skill');
+  });
+
+  it('declares all four MCP tool annotations on every tool', async () => {
+    // MCP lets a tool declare readOnlyHint, destructiveHint,
+    // idempotentHint and openWorldHint, so a host can warn a user
+    // before invoking it. A missing hint is worse than a wrong one: a
+    // host that reads "unknown" has to assume the worst, and OpenAI's
+    // directory rejects a tool where any of the four is missing.
+    const { BROWSER_TOOLS } = await import('../../src/mcp/server.js');
+
+    expect(BROWSER_TOOLS.length).toBeGreaterThan(0);
+
+    for (const tool of BROWSER_TOOLS) {
+      for (const hint of [
+        'readOnlyHint',
+        'destructiveHint',
+        'idempotentHint',
+        'openWorldHint',
+      ] as const) {
+        expect(typeof tool[hint], `${tool.name} is missing ${hint}`).toBe('boolean');
+      }
+    }
+
+    // The values have to match the behaviour, not just be present.
+    const byName = new Map(BROWSER_TOOLS.map((tool) => [tool.name, tool]));
+
+    // A tool that only reads is read-only.
+    expect(byName.get('snapshot')?.readOnlyHint).toBe(true);
+    expect(byName.get('verify')?.readOnlyHint).toBe(true);
+    expect(byName.get('extract')?.readOnlyHint).toBe(true);
+
+    // A tool that acts on the page is not.
+    expect(byName.get('act')?.readOnlyHint).toBe(false);
+    expect(byName.get('act')?.destructiveHint).toBe(true);
+
+    // And they are not idempotent: clicking twice is not clicking once.
+    expect(byName.get('act')?.idempotentHint).toBe(false);
+
+    // The tools that touch the open web say so.
+    expect(byName.get('snapshot')?.openWorldHint).toBe(true);
+    expect(byName.get('approve')?.openWorldHint).toBe(false);
   });
 
   it('has a demo page that actually plays the videos', async () => {

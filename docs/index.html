@@ -18,28 +18,12 @@
         padding: 3rem 1.5rem;
         background: var(--bg);
         color: var(--fg);
-        font:
-          16px/1.6 ui-sans-serif,
-          system-ui,
-          -apple-system,
-          sans-serif;
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
       }
-      main {
-        max-width: 60rem;
-        margin: 0 auto;
-      }
-      h1 {
-        font-size: 1.9rem;
-        margin: 0 0 0.4rem;
-      }
-      h2 {
-        font-size: 1.25rem;
-        margin: 0 0 0.35rem;
-      }
-      p.lede {
-        color: var(--dim);
-        margin: 0 0 2.5rem;
-      }
+      main { max-width: 60rem; margin: 0 auto; }
+      h1 { font-size: 1.9rem; margin: 0 0 0.4rem; }
+      h2 { font-size: 1.25rem; margin: 0 0 0.35rem; }
+      p.lede { color: var(--dim); margin: 0 0 2.5rem; }
       .video {
         background: var(--panel);
         border: 1px solid #262a34;
@@ -47,20 +31,9 @@
         padding: 1.25rem;
         margin-bottom: 2rem;
       }
-      .blurb {
-        color: var(--dim);
-        margin: 0 0 1rem;
-      }
-      video {
-        width: 100%;
-        height: auto;
-        border-radius: 6px;
-        background: #000;
-        display: block;
-      }
-      a {
-        color: var(--accent);
-      }
+      .blurb { color: var(--dim); margin: 0 0 1rem; }
+      video { width: 100%; height: auto; border-radius: 6px; background: #000; display: block; }
+      a { color: var(--accent); }
       code {
         background: var(--panel);
         padding: 0.15em 0.4em;
@@ -73,47 +46,38 @@
     <main>
       <h1>browser-verified-skill</h1>
       <p class="lede">
-        Two real runs against a local fixture site. Nothing is mocked. The refusals are the content:
-        a tool that cannot be stopped from doing something unsafe is not a tool an agent can be
-        trusted with.
+        Two real runs against a local fixture site. Nothing is mocked. The
+        refusals are the content: a tool that cannot be stopped from doing
+        something unsafe is not a tool an agent can be trusted with.
       </p>
 
-      <section class="video">
-        <h2>The agent demo</h2>
-        <p class="blurb">
-          Hermes, given a repo link and a task, installs the skill, fills a form, gets a human
-          approval for the submit, and then meets a prompt-injection payload -- and does not work
-          around the refusal.
+    <section class="video">
+      <h2>The agent demo</h2>
+      <p class="blurb">Hermes, given a repo link and a task, installs the skill, fills a form, gets a human approval for the submit, and then meets a prompt-injection payload -- and does not work around the refusal.</p>
+      <video controls preload="metadata" poster="agent-demo-poster.jpg" width="960">
+        <source src="agent-demo.mp4" type="video/mp4" />
+        <p>
+          Your browser cannot play this video.
+          <a href="agent-demo.mp4">Download it</a> instead.
         </p>
-        <video controls preload="metadata" poster="agent-demo-poster.jpg" width="960">
-          <source src="agent-demo.mp4" type="video/mp4" />
-          <p>
-            Your browser cannot play this video.
-            <a href="agent-demo.mp4">Download it</a> instead.
-          </p>
-        </video>
-      </section>
-      <section class="video">
-        <h2>The tool demo</h2>
-        <p class="blurb">
-          A real run of the CLI: the injection block, the agent that cannot approve its own action,
-          the tainted value, the human approval, the verification, and the run compiled into a plain
-          Playwright script.
+      </video>
+    </section>
+    <section class="video">
+      <h2>The tool demo</h2>
+      <p class="blurb">A real run of the CLI: the injection block, the agent that cannot approve its own action, the tainted value, the human approval, the verification, and the run compiled into a plain Playwright script.</p>
+      <video controls preload="metadata" poster="demo-poster.jpg" width="960">
+        <source src="demo.mp4" type="video/mp4" />
+        <p>
+          Your browser cannot play this video.
+          <a href="demo.mp4">Download it</a> instead.
         </p>
-        <video controls preload="metadata" poster="demo-poster.jpg" width="960">
-          <source src="demo.mp4" type="video/mp4" />
-          <p>
-            Your browser cannot play this video.
-            <a href="demo.mp4">Download it</a> instead.
-          </p>
-        </video>
-      </section>
+      </video>
+    </section>
 
       <p class="lede">
         The repository is at
-        <a href="https://github.com/OMD-123/browser-verified-skill"
-          >OMD-123/browser-verified-skill</a
-        >. Run the demo yourself with <code>npm run demo</code>.
+        <a href="https://github.com/OMD-123/browser-verified-skill">OMD-123/browser-verified-skill</a>.
+        Run the demo yourself with <code>npm run demo</code>.
       </p>
     </main>
   </body>
