@@ -15,6 +15,17 @@ description: >-
 `bv` is a browser driver where every action is checked and every run leaves
 evidence behind.
 
+## Before anything else: is `bv` installed?
+
+Check first, install only if it is missing:
+
+```bash
+bv --version || npm install -g browser-verified-skill
+```
+
+The agent needs a real browser too. If a command fails with a missing
+browser, run `bv doctor --install` once.
+
 ## The one rule
 
 **Read before you act.** `bv snapshot` shows the page as an accessibility

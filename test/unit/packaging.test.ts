@@ -520,6 +520,24 @@ describe('the published artifact', () => {
     expect(byName.get('approve')?.openWorldHint).toBe(false);
   });
 
+  it('tells the agent how to install the CLI', async () => {
+    // A skill that assumes `bv` exists is a skill that fails on a
+    // machine that has never installed it -- which is every machine a
+    // skill marketplace hands it to. The install step has to be in the
+    // skill, not in the reader's head.
+    const skill = await readFile(join(ROOT, 'SKILL.md'), 'utf8');
+
+    expect(skill).toContain('npm install -g browser-verified-skill');
+    expect(skill).toContain('bv --version');
+
+    // And it has to be near the top, before the first command, not
+    // buried at the bottom.
+    const installAt = skill.indexOf('npm install -g browser-verified-skill');
+    const firstCommand = skill.indexOf('bv session start');
+    expect(installAt, 'the install step is missing').toBeGreaterThan(-1);
+    expect(installAt, 'the install step comes after the first command').toBeLessThan(firstCommand);
+  });
+
   it('has a demo page that actually plays the videos', async () => {
     // A README cannot play a video -- GitHub strips the <video> tag. A
     // web page can, and GitHub Pages serves an mp4 as video/mp4 with
