@@ -552,6 +552,20 @@ describe('the published artifact', () => {
     expect(frontmatter).toMatch(/name:\s*browser-verified-skill/);
   });
 
+  it('has an M8ven badge that is the verified-ownership one', async () => {
+    // M8ven's badge URL carries a token. The plain slug renders a grade
+    // but proves nothing, so it is not the badge to publish -- and a
+    // wrong token renders the same grade, so nothing catches it by
+    // eye. The tokenised form is what makes the listing "Claimed".
+    const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+
+    expect(readme).toContain('https://m8ven.ai/badge/mcp/omd-123-browser-verified-skill-etijqi?v=');
+    expect(readme).toContain('https://m8ven.ai/mcp/omd-123-browser-verified-skill-etijqi?s=readme');
+
+    // The old, un-proven badge must be gone.
+    expect(readme).not.toContain('m8ven.ai/badge/mcp/omd-123/browser-verified-skill"');
+  });
+
   it('tells the agent how to install the CLI', async () => {
     // A skill that assumes `bv` exists is a skill that fails on a
     // machine that has never installed it -- which is every machine a
