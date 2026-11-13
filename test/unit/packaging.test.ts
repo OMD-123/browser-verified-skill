@@ -520,6 +520,38 @@ describe('the published artifact', () => {
     expect(byName.get('approve')?.openWorldHint).toBe(false);
   });
 
+  it('packages the skill the way a skill marketplace wants it', async () => {
+    // Agensi's own example is:
+    //
+    //     my-skill/
+    //     ├── SKILL.md
+    //     ├── scripts/run.py
+    //     └── reference/notes.md
+    //
+    // So: ONE top-level folder, SKILL.md at its root, and only the files
+    // the skill actually needs. A repository's .git and 150 TypeScript
+    // files are not what a marketplace hands to an agent.
+    const script = await readFile(join(ROOT, 'scripts', 'package-skill.sh'), 'utf8');
+    expect(script).toContain('SKILL.md');
+    expect(script).toContain('references');
+    expect(script).toContain('skills');
+
+    // It must not ship the repository.
+    expect(script).not.toMatch(/cp -r src\b/);
+    expect(script).not.toMatch(/cp -r test\b/);
+    expect(script).not.toMatch(/cp -r \.git/);
+
+    // The frontmatter a marketplace parses: name and description, both
+    // required by the Agent Skills standard.
+    const skill = await readFile(join(ROOT, 'SKILL.md'), 'utf8');
+    const frontmatter = skill.split('---')[1] ?? '';
+    expect(frontmatter).toMatch(/^\s*name:\s*\S+/m);
+    expect(frontmatter).toMatch(/^\s*description:/m);
+
+    // And the name matches the folder the archive uses.
+    expect(frontmatter).toMatch(/name:\s*browser-verified-skill/);
+  });
+
   it('tells the agent how to install the CLI', async () => {
     // A skill that assumes `bv` exists is a skill that fails on a
     // machine that has never installed it -- which is every machine a

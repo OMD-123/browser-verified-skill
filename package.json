@@ -101,6 +101,7 @@
     "demo:agent": "bash scripts/demo-agent-live.sh",
     "demo:posters": "python3 scripts/make-posters.py",
     "demo:page": "tsx scripts/render-demo-page.ts",
+    "package:skill": "bash scripts/package-skill.sh",
     "docs:tree": "tsx scripts/generate-tree.ts",
     "docs:check": "tsx scripts/check-docs.ts",
     "cli": "tsx src/cli/main.ts",
