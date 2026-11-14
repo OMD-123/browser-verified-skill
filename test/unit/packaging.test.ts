@@ -552,6 +552,30 @@ describe('the published artifact', () => {
     expect(frontmatter).toMatch(/name:\s*browser-verified-skill/);
   });
 
+  it('has a badge for the directories that list it', async () => {
+    // Three directories index this server: M8ven, mcpservers.org and
+    // AgenticSkills. A badge is a claim that somebody else verified it,
+    // so each one has to point at that directory's own listing -- not at
+    // the repo, and not at a stale URL.
+    const readme = await readFile(join(ROOT, 'README.md'), 'utf8');
+
+    const expected = [
+      [
+        'https://mcpservers.org/badge.svg',
+        'https://mcpservers.org/servers/omd-123/browser-verified-skill',
+      ],
+      [
+        'https://m8ven.ai/badge/mcp/',
+        'https://m8ven.ai/mcp/omd-123-browser-verified-skill-etijqi?s=readme',
+      ],
+    ] as const;
+
+    for (const [src, href] of expected) {
+      expect(readme, `the badge image is missing: ${src}`).toContain(src);
+      expect(readme, `the badge does not link to its listing: ${href}`).toContain(href);
+    }
+  });
+
   it('has an M8ven badge that is the verified-ownership one', async () => {
     // M8ven's badge URL carries a token. The plain slug renders a grade
     // but proves nothing, so it is not the badge to publish -- and a

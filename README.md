@@ -24,6 +24,9 @@ Playwright script. Replay it for free.**
   <a href="https://m8ven.ai/mcp/omd-123-browser-verified-skill-etijqi?s=readme">
     <img alt="M8ven score" src="https://m8ven.ai/badge/mcp/omd-123-browser-verified-skill-etijqi?v=2fb3ed096282995f4d34fce0f4748811" height="20">
   </a>
+  <a href="https://mcpservers.org/servers/omd-123/browser-verified-skill">
+    <img alt="Listed on mcpservers.org" src="https://mcpservers.org/badge.svg" height="20">
+  </a>
 </p>
 
 </div>
